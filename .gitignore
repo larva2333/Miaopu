@@ -11,3 +11,4 @@ work/
 build_log*.txt
 replay_pid*.log
 hs_err_pid*.log
+build_release_log.txt
