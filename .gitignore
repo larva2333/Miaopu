@@ -8,3 +8,6 @@ local.properties
 outputs/
 work/
 .DS_Store
+build_log*.txt
+replay_pid*.log
+hs_err_pid*.log

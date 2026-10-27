@@ -57,9 +57,7 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
-            manifestPlaceholders["appLabel"] = "喵扑测试版"
+            manifestPlaceholders["appLabel"] = "喵扑"
         }
         release {
             isMinifyEnabled = true
@@ -72,11 +70,12 @@ android {
         }
     }
 
+    // Daily driver: release optimisations (AOT + R8) but signed with the debug key so it can be
+    // installed over the existing debug build without wiping app data. Debug builds run every
+    // frame interpreted and measurably drop frames while scrolling, so this is what ships.
     buildTypes.create("releaseTest") {
         initWith(buildTypes.getByName("release"))
-        applicationIdSuffix = ".releaseTest"
-        versionNameSuffix = "-release-test"
-        manifestPlaceholders["appLabel"] = "喵扑 Release 测试"
+        manifestPlaceholders["appLabel"] = "喵扑"
         signingConfig = signingConfigs.getByName("debug")
         matchingFallbacks += "release"
     }
