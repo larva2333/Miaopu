@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -28,10 +29,15 @@ import dev.kiritoxd.miaopu.data.StageRatingDetail
 import dev.kiritoxd.miaopu.data.mergeCommentsByHeat
 import dev.kiritoxd.miaopu.data.isNewerVersion
 import dev.kiritoxd.miaopu.widget.WidgetUpdates
+import dev.kiritoxd.miaopu.widget.PinnableWidget
+import dev.kiritoxd.miaopu.widget.WidgetPinner
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 
@@ -55,6 +61,7 @@ enum class MainSection {
     PROFILE,
 }
 
+@Stable
 class MiaopuViewModel(
     application: Application,
     private val savedStateHandle: SavedStateHandle,
@@ -119,6 +126,12 @@ class MiaopuViewModel(
     private var commentJob: Job? = null
     private var moreCommentsJob: Job? = null
     private var publishCommentJob: Job? = null
+    private var schedulePollingJob: Job? = null
+    private var widgetPinJob: Job? = null
+    var isRefreshing: Boolean by mutableStateOf(false)
+        private set
+    var refreshToast: String? by mutableStateOf(null)
+        private set
 
     init {
         loadSubscribedSchedules()
@@ -157,6 +170,15 @@ class MiaopuViewModel(
         selectedEsport = esport
         subscriptionStore.saveSelected(esport)
         if (scheduleStateFor(esport) !is LoadState.Ready) loadSchedule(esport = esport)
+    }
+
+    /** Re-tapping the Events tab walks to the next subscribed esport, wrapping around. */
+    fun cycleSelectedEsport() {
+        val list = subscribedEsports
+        if (list.size < 2) return
+        val current = list.indexOf(selectedEsport)
+        val next = list[(current + 1).coerceAtLeast(0) % list.size]
+        selectEsport(next)
     }
 
     internal fun cachedScheduleFor(esport: Esport): Schedule? = schedules[esport]
@@ -229,6 +251,100 @@ class MiaopuViewModel(
     fun refreshHomeSchedules() {
         adapter.invalidateSharedScheduleCache()
         loadSubscribedSchedules(force = true)
+    }
+
+    /**
+     * Manual refresh triggered by the header refresh button. Surfaces a loading spinner through
+     * [isRefreshing] and posts a toast once the network call finishes, even when the schedule content
+     * is unchanged.
+     */
+    fun manualRefreshHomeSchedules() {
+        if (isRefreshing) return
+        isRefreshing = true
+        refreshToast = "正在刷新…"
+        viewModelScope.launch {
+            try {
+                adapter.invalidateSharedScheduleCache()
+                val jobs = subscribedEsports.mapNotNull { loadSchedule(esport = it, force = true) }
+                jobs.joinAll()
+                refreshToast = if (subscribedEsports.any { scheduleStateFor(it) is LoadState.Ready }) {
+                    "赛程已更新"
+                } else {
+                    "刷新失败，已保留原赛程"
+                }
+            } finally {
+                isRefreshing = false
+            }
+        }
+    }
+
+    fun manualRefreshSchedule() {
+        if (isRefreshing) return
+        isRefreshing = true
+        val esport = selectedEsport
+        refreshToast = "正在刷新…"
+        viewModelScope.launch {
+            try {
+                adapter.invalidateSharedScheduleCache()
+                loadSchedule(esport = esport, force = true)?.join()
+                refreshToast = if (scheduleStateFor(esport) is LoadState.Ready) {
+                    "${esport.shortTitle} 赛程已更新"
+                } else {
+                    "刷新失败，已保留原赛程"
+                }
+            } finally {
+                isRefreshing = false
+            }
+        }
+    }
+
+    internal fun clearRefreshToast() {
+        refreshToast = null
+    }
+
+    /**
+     * Poll the schedule in view while the user is on the Schedule screen. New data lands directly in
+     * the UI and the screen shows a toast; this removes the need to tap the refresh button.
+     */
+    internal fun startSchedulePolling() {
+        if (schedulePollingJob?.isActive == true) return
+        schedulePollingJob = viewModelScope.launch {
+            while (isActive) {
+                delay(SCHEDULE_POLL_INTERVAL_MS)
+                when (selectedMainSection) {
+                    MainSection.HOME -> refreshHomeSchedules()
+                    MainSection.EVENTS -> refreshSchedule()
+                    MainSection.PROFILE -> Unit
+                }
+            }
+        }
+    }
+
+    internal fun stopSchedulePolling() {
+        schedulePollingJob?.cancel()
+        schedulePollingJob = null
+    }
+
+    internal fun addWidget(widget: PinnableWidget) {
+        if (widgetPinJob?.isActive == true) return
+        val app = getApplication<Application>()
+        widgetPinJob = viewModelScope.launch {
+            val before = WidgetPinner.instanceCount(app, widget)
+            if (before > 0) {
+                // 桌面已经有同款，再发一次会被 launcher 落回同一格、覆盖原来的位置，直接引导手动添加。
+                message = "桌面上已有 $before 个，长按桌面空白处 → 添加小工具 → 喵扑 可再添加一个"
+                return@launch
+            }
+            val requested = WidgetPinner.request(app, widget)
+            // 小米桌面是静默添加（没有任何确认弹窗），launcher 落位是异步的，
+            // 所以等一小会儿再核对实例数量，避免把"已加成功"误报成失败。
+            if (requested) delay(WIDGET_PIN_SETTLE_MS)
+            val after = WidgetPinner.instanceCount(app, widget)
+            message = when {
+                after > before -> "已添加到桌面，回到桌面即可看到；长按可调整位置"
+                else -> "系统拦下了添加：请点上方「开启桌面快捷方式权限」允许后再试"
+            }
+        }
     }
 
     fun checkForUpdates() {
@@ -490,12 +606,12 @@ class MiaopuViewModel(
         subscribedEsports.forEach { esport -> loadSchedule(esport = esport, force = force) }
     }
 
-    private fun loadSchedule(esport: Esport = selectedEsport, force: Boolean = false) {
+    private fun loadSchedule(esport: Esport = selectedEsport, force: Boolean = false): Job? {
         if (!force) schedules[esport]?.let {
             updateScheduleState(esport, LoadState.Ready(it))
-            return
+            return null
         }
-        if (!force && scheduleJobs[esport]?.isActive == true) return
+        if (!force && scheduleJobs[esport]?.isActive == true) return null
         scheduleJobs.remove(esport)?.cancel()
         updateScheduleState(esport, LoadState.Loading)
         val scheduleJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -509,6 +625,7 @@ class MiaopuViewModel(
         }
         scheduleJobs[esport] = scheduleJob
         scheduleJob.start()
+        return scheduleJob
     }
 
     private fun updateScheduleState(esport: Esport, state: LoadState<Schedule>) {
@@ -625,5 +742,7 @@ class MiaopuViewModel(
     private companion object {
         const val SELECTED_MAIN_SECTION_KEY = "selected_main_section"
         const val COMMENT_DRAFT_KEY = "comment_draft"
+        const val SCHEDULE_POLL_INTERVAL_MS: Long = 120_000L
+        const val WIDGET_PIN_SETTLE_MS: Long = 900L
     }
 }

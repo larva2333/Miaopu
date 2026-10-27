@@ -1,23 +1,14 @@
 package dev.kiritoxd.miaopu.ui
 
-import androidx.compose.animation.AnimatedVisibility
+import android.widget.Toast
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Text
+import androidx.compose.ui.platform.LocalContext
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
@@ -37,6 +28,14 @@ fun MiaopuApp(viewModel: MiaopuViewModel) {
     val themeController = remember { ThemeController(ColorSchemeMode.System) }
     MiuixTheme(controller = themeController) {
         Box(Modifier.fillMaxSize()) {
+            // Transient feedback only: a pinning bottom card had to be dismissed by hand and could
+            // sit on screen forever, so every ViewModel message now surfaces as a system toast.
+            val context = LocalContext.current
+            LaunchedEffect(viewModel.message) {
+                val text = viewModel.message ?: return@LaunchedEffect
+                Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+                viewModel.dismissMessage()
+            }
             val cornerRadius = rememberNavSystemCornerRadius()
             val backdropColor = MiuixTheme.colorScheme.surface
             val navEffects = remember(cornerRadius, backdropColor) {
@@ -79,23 +78,6 @@ fun MiaopuApp(viewModel: MiaopuViewModel) {
                         onBack = viewModel::goBack,
                         onLoginDetected = viewModel::finishLogin,
                     )
-                }
-            }
-
-            AnimatedVisibility(
-                visible = viewModel.message != null,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                    .padding(16.dp),
-            ) {
-                Card(
-                    onClick = viewModel::dismissMessage,
-                    showIndication = true,
-                    insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    cornerRadius = 18.dp,
-                ) {
-                    Text(text = viewModel.message.orEmpty())
                 }
             }
         }

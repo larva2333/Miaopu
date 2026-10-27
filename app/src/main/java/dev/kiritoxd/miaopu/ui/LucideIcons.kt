@@ -20,6 +20,7 @@ internal object LucideIcons {
     val CircleUserRound: ImageVector by lazy { icon("CircleUserRound", "M17.925 20.056a6 6 0 0 0-11.851.001", "M8.0 11.0a4.0 4.0 0 1 0 8.0 0a4.0 4.0 0 1 0 -8.0 0", "M2.0 12.0a10.0 10.0 0 1 0 20.0 0a10.0 10.0 0 1 0 -20.0 0") }
     val GripVertical: ImageVector by lazy { icon("GripVertical", "M8.0 12.0a1.0 1.0 0 1 0 2.0 0a1.0 1.0 0 1 0 -2.0 0", "M8.0 5.0a1.0 1.0 0 1 0 2.0 0a1.0 1.0 0 1 0 -2.0 0", "M8.0 19.0a1.0 1.0 0 1 0 2.0 0a1.0 1.0 0 1 0 -2.0 0", "M14.0 12.0a1.0 1.0 0 1 0 2.0 0a1.0 1.0 0 1 0 -2.0 0", "M14.0 5.0a1.0 1.0 0 1 0 2.0 0a1.0 1.0 0 1 0 -2.0 0", "M14.0 19.0a1.0 1.0 0 1 0 2.0 0a1.0 1.0 0 1 0 -2.0 0") }
     val House: ImageVector by lazy { icon("House", "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8", "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z") }
+    val LocateFixed: ImageVector by lazy { icon("LocateFixed", "M2 12h3", "M19 12h3", "M12 2v3", "M12 19v3", "M12 5a7 7 0 1 0 0 14a7 7 0 1 0 0 -14", "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0 -6") }
     val Plus: ImageVector by lazy { icon("Plus", "M5 12h14", "M12 5v14") }
     val RefreshCw: ImageVector by lazy { icon("RefreshCw", "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", "M21 3v5h-5", "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", "M8 16H3v5") }
     val Search: ImageVector by lazy { icon("Search", "m21 21-4.34-4.34", "M3.0 11.0a8.0 8.0 0 1 0 16.0 0a8.0 8.0 0 1 0 -16.0 0") }

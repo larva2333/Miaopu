@@ -1,5 +1,8 @@
 package dev.kiritoxd.miaopu.data
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Team(
     val id: String,
     val name: String,
@@ -12,6 +15,7 @@ data class Team(
     val description: String? = null,
 )
 
+@Immutable
 data class MatchSummary(
     val id: String,
     val esport: Esport,
@@ -31,6 +35,7 @@ data class MatchSummary(
     val uniqueKey: String = id,
 )
 
+@Immutable
 data class FeaturedPlayer(
     val name: String,
     val logoUrl: String?,
@@ -43,17 +48,20 @@ data class FeaturedPlayer(
     val teamLogoUrl: String? = null,
 )
 
+@Immutable
 data class ScheduleDay(
     val date: String,
     val label: String,
     val matches: List<MatchSummary>,
 )
 
+@Immutable
 data class Schedule(
     val anchorMatchId: String?,
     val days: List<ScheduleDay>,
 )
 
+@Immutable
 data class RatingTarget(
     val nodeId: Long?,
     val outBizType: String,
@@ -83,6 +91,7 @@ data class RatingTarget(
     val championImageUrl: String? = null,
 )
 
+@Immutable
 data class RatingStage(
     val name: String,
     val targets: List<RatingTarget>,
@@ -92,11 +101,13 @@ data class RatingStage(
     val targetCount: Int = targets.size,
 )
 
+@Immutable
 data class RatingDetail(
     val title: String,
     val stages: List<RatingStage>,
 )
 
+@Immutable
 data class RatingGroup(
     val id: Long?,
     val name: String,
@@ -108,6 +119,7 @@ data class RatingGroup(
     val targets: List<RatingTarget> = emptyList(),
 )
 
+@Immutable
 data class StageRatingDetail(
     val title: String,
     val description: String?,
@@ -116,6 +128,7 @@ data class StageRatingDetail(
     val groups: List<RatingGroup>,
 )
 
+@Immutable
 data class CommentBadge(
     val id: String?,
     val name: String?,
@@ -123,6 +136,7 @@ data class CommentBadge(
     val backgroundImageUrl: String?,
 )
 
+@Immutable
 data class CommentMedia(
     val id: String?,
     val url: String,
@@ -133,6 +147,7 @@ data class CommentMedia(
     val audioConversionAvailable: Boolean? = null,
 )
 
+@Immutable
 data class HupuComment(
     val id: String,
     val subjectId: String,
@@ -180,6 +195,7 @@ data class HupuComment(
     val highlightTexts: List<String> = emptyList(),
 )
 
+@Immutable
 data class CommentPage(
     val comments: List<HupuComment>,
     val totalCount: Int,

@@ -35,7 +35,7 @@ import coil3.compose.AsyncImage
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-internal const val TabMotionDurationMillis = 320
+internal const val TabMotionDurationMillis = 180
 internal val TabMotionEasing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
 
 internal enum class DetailTabStyle { PAGE, MAP, TEAM }
@@ -92,7 +92,7 @@ internal fun DetailTabs(
                     .padding(horizontal = 8.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                     logos.getOrNull(index)?.let { logo ->
-                        AsyncImage(logo, null, Modifier.size(26.dp))
+                        LogoImage(logo, Modifier.size(26.dp))
                         Spacer(Modifier.width(7.dp))
                     }
                     Text(label, color = foreground, fontSize = if (isPage) 17.sp else 14.sp,
@@ -138,14 +138,18 @@ private fun PreviousPageTabs(
     if (labels.isEmpty()) return
     val colors = MiuixTheme.colorScheme
     val connected = style != DetailTabStyle.MAP
-    val overflowing = labels.size > 3
     val selectedIndex = selected.coerceIn(labels.indices)
     val spacing = if (connected) 2.dp else 8.dp
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        val tabWidth = if (overflowing) 96.dp else (maxWidth - spacing * (labels.size - 1)) / labels.size
+        // Share the row evenly whenever every tab can still fit a short label; a fixed 96dp width
+        // left big gaps between three-letter names like "CS2". Only fall back to a scrolling row
+        // once the shares get too narrow to read.
+        val equalWidth = (maxWidth - spacing * (labels.size - 1)) / labels.size
+        val overflowing = equalWidth < 72.dp
+        val tabWidth = if (overflowing) 96.dp else equalWidth
         val contentWidth = if (overflowing) tabWidth * labels.size + spacing * (labels.size - 1) else maxWidth
         // Read only in graphicsLayer: progress never recomposes or remeasures the tab row.
         val indicatorPosition = animateFloatAsState(
@@ -206,7 +210,7 @@ private fun PreviousPageTabItem(
         .padding(horizontal = 6.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         if (logo != null) {
-            AsyncImage(logo, null, Modifier.size(22.dp))
+            LogoImage(logo, Modifier.size(22.dp))
             Spacer(Modifier.width(6.dp))
         }
         Text(label, color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,

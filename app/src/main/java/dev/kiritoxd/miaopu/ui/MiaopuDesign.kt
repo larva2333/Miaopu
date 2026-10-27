@@ -30,7 +30,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.transformations
 import dev.kiritoxd.miaopu.data.Team
+import dev.kiritoxd.miaopu.data.TrimTransparentTransformation
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TabRowColors
@@ -126,34 +131,55 @@ internal fun TagPill(
     }
 }
 
+/**
+ * League/crest logo with transparent canvas padding trimmed away, so differently padded sources
+ * render at the same visual size inside a fixed box.
+ */
+@Composable
+internal fun LogoImage(
+    url: String,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+) {
+    val context = LocalContext.current
+    AsyncImage(
+        model = remember(url) {
+            ImageRequest.Builder(context)
+                .data(url)
+                .transformations(TrimTransparentTransformation())
+                .build()
+        },
+        contentDescription = null,
+        modifier = modifier,
+        contentScale = contentScale,
+    )
+}
+
 @Composable
 internal fun TeamLogo(
     team: Team,
     size: Dp,
     onAccent: Boolean = false,
 ) {
+    val showFallback = team.logoUrl.isNullOrBlank()
     val fallbackBackground = if (onAccent) Color.White.copy(alpha = 0.18f) else MiuixTheme.colorScheme.surfaceVariant
     Box(
         modifier = Modifier
             .size(size)
             .clip(RoundedCornerShape(size * 0.32f))
-            .background(fallbackBackground),
+            .then(if (showFallback) Modifier.background(fallbackBackground) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        if (team.logoUrl.isNullOrBlank()) {
+        if (showFallback) {
             Text(
                 team.name.take(1),
                 color = if (onAccent) Color.White else MiuixTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
             )
         } else {
-            AsyncImage(
-                model = team.logoUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(6.dp),
-                contentScale = ContentScale.Fit,
+            LogoImage(
+                url = team.logoUrl,
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
@@ -247,3 +273,4 @@ internal fun CenteredMessage(
         }
     }
 }
+

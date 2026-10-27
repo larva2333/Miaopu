@@ -1,6 +1,13 @@
 package dev.kiritoxd.miaopu.ui
 
+import android.widget.Toast
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +27,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -32,6 +40,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -49,12 +60,16 @@ import dev.kiritoxd.miaopu.data.Schedule
 import dev.kiritoxd.miaopu.data.focusMatchId
 import dev.kiritoxd.miaopu.data.focusInitialItemIndex
 import dev.kiritoxd.miaopu.data.homeWindowAround
+import dev.kiritoxd.miaopu.data.liveOrUpcomingFocus
 import dev.kiritoxd.miaopu.data.mergeSchedules
+import dev.kiritoxd.miaopu.widget.PinnableWidget
+import dev.kiritoxd.miaopu.widget.WidgetPinner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
+import kotlin.math.abs
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -70,6 +85,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 private class MainPageRequest(val section: MainSection)
+private const val MainSectionMotionDurationMillis = 180
 
 @Composable
 fun ScheduleScreen(viewModel: MiaopuViewModel) {
@@ -79,6 +95,7 @@ fun ScheduleScreen(viewModel: MiaopuViewModel) {
         initialPage = viewModel.selectedMainSection.ordinal,
         pageCount = { sections.size },
     )
+    val pagerFlingBehavior = rememberMiaopuPagerFlingBehavior(pagerState)
     var pageRequest by remember { mutableStateOf<MainPageRequest?>(null) }
     val selectSection: (MainSection) -> Unit = { section ->
         if (pageRequest?.section != section &&
@@ -105,10 +122,15 @@ fun ScheduleScreen(viewModel: MiaopuViewModel) {
     LaunchedEffect(pageRequest, pagerState) {
         val request = pageRequest ?: return@LaunchedEffect
         try {
-            pagerState.animateScrollToPage(
-                request.section.ordinal,
-                animationSpec = tween(TabMotionDurationMillis, easing = TabMotionEasing),
-            )
+            if (abs(pagerState.currentPage - request.section.ordinal) > 1) {
+                // Animating across the middle page doubles the full-screen composition cost.
+                pagerState.scrollToPage(request.section.ordinal)
+            } else {
+                pagerState.animateScrollToPage(
+                    request.section.ordinal,
+                    animationSpec = tween(MainSectionMotionDurationMillis, easing = TabMotionEasing),
+                )
+            }
         } finally {
             if (pageRequest === request) pageRequest = null
         }
@@ -124,26 +146,47 @@ fun ScheduleScreen(viewModel: MiaopuViewModel) {
                 if (section != viewModel.selectedMainSection) viewModel.selectMainSection(section)
             }
     }
+    DisposableEffect(Unit) {
+        viewModel.startSchedulePolling()
+        onDispose { viewModel.stopSchedulePolling() }
+    }
+    val context = LocalContext.current
+    LaunchedEffect(viewModel.refreshToast) {
+        viewModel.refreshToast?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            viewModel.clearRefreshToast()
+        }
+    }
     Scaffold(
         containerColor = MiuixTheme.colorScheme.surface,
         bottomBar = {
             MainNavigationBar(
                 selected = visibleSection,
                 onSelect = selectSection,
+                onCycleEvents = { viewModel.cycleSelectedEsport() },
             )
         },
     ) { innerPadding ->
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize(),
+            flingBehavior = pagerFlingBehavior,
+            modifier = Modifier.fillMaxSize().clipToBounds(),
+            beyondViewportPageCount = 2,
             key = { page -> sections[page].name },
         ) { page ->
-            MainSectionContent(
-                viewModel = viewModel,
-                section = sections[page],
-                subscriptions = subscriptions,
-                innerPadding = innerPadding,
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MiuixTheme.colorScheme.surface)
+                    .graphicsLayer { clip = true },
+            ) {
+                MainSectionContent(
+                    viewModel = viewModel,
+                    section = sections[page],
+                    subscriptions = subscriptions,
+                    innerPadding = innerPadding,
+                )
+            }
         }
     }
 }
@@ -156,13 +199,31 @@ private fun MainSectionContent(
     innerPadding: PaddingValues,
 ) {
     when (section) {
-        MainSection.HOME -> HomeSectionContent(viewModel, subscriptions, innerPadding)
-        MainSection.EVENTS -> EventsSectionContent(viewModel, subscriptions, innerPadding)
+        MainSection.HOME ->
+            HomeSectionContent(viewModel, subscriptions, innerPadding)
+        MainSection.EVENTS ->
+            EventsSectionContent(viewModel, subscriptions, innerPadding)
         MainSection.PROFILE -> ProfileContent(viewModel = viewModel, innerPadding = innerPadding)
     }
 }
 
 private class HomeScheduleMerge(val sources: List<Schedule>, val schedule: Schedule)
+
+@Composable
+private fun RefreshIcon(spinning: Boolean) {
+    val transition = rememberInfiniteTransition(label = "refreshSpin")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 700, easing = LinearEasing)),
+        label = "refreshRotation",
+    )
+    Icon(
+        imageVector = LucideIcons.RefreshCw,
+        contentDescription = if (spinning) "刷新中" else "刷新赛程",
+        modifier = Modifier.graphicsLayer { rotationZ = if (spinning) rotation else 0f },
+    )
+}
 
 @Composable
 private fun HomeSectionContent(
@@ -188,25 +249,40 @@ private fun HomeSectionContent(
     val mergedSchedule = mergeResult?.takeIf { result ->
         !loading && result.sources === mergeSources
     }?.schedule
-    // Once reading starts, a network completion must not replace the visible timeline.
+    // Apply refreshes immediately. Stable item keys keep the current rows from jumping. Background
+    // polling stays silent, so no toast here: only the refresh button reports progress.
     LaunchedEffect(loading, mergedSchedule, subscriptions) {
-        if (mergedSchedule != null && displayedSchedule == null && readySchedules.isNotEmpty()) {
+        if (mergedSchedule != null && readySchedules.isNotEmpty()) {
             displayedSchedule = mergedSchedule
         }
     }
-    val pendingUpdate = mergedSchedule != null && readySchedules.isNotEmpty() &&
-        displayedSchedule != null && displayedSchedule !== mergedSchedule
     val bottomPadding = innerPadding.calculateBottomPadding()
+    var focusRequest by rememberSaveable { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(top = innerPadding.calculateTopPadding()),
     ) {
-        HomeHeader(viewModel)
+        val focusSchedule = displayedSchedule ?: mergedSchedule
+        val focusNow = System.currentTimeMillis()
+        HomeHeader(
+            viewModel = viewModel,
+            focusEnabled = focusSchedule
+                ?.homeWindowAround(focusNow)
+                ?.liveOrUpcomingFocus(focusNow) != null,
+            onFocusMatch = { focusRequest++ },
+        )
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             when {
-                displayedSchedule != null -> HomeContent(viewModel, checkNotNull(displayedSchedule), bottomPadding)
+                displayedSchedule != null ->
+                    HomeContent(
+                        viewModel,
+                        checkNotNull(displayedSchedule),
+                        bottomPadding,
+                        focusRequest,
+                        onFocusHandled = { focusRequest = 0 },
+                    )
                 (loading || (mergedSchedule == null && readySchedules.isNotEmpty())) -> LoadingPane(
                     label = "正在合并已订阅赛事",
                     modifier = Modifier.fillMaxSize().padding(bottom = bottomPadding),
@@ -214,21 +290,24 @@ private fun HomeSectionContent(
                 failedStates.isNotEmpty() -> ErrorPane(
                     message = failedStates.first().message,
                     retryable = failedStates.any(LoadState.Failed::retryable),
-                    onRetry = viewModel::refreshHomeSchedules,
+                    onRetry = viewModel::manualRefreshHomeSchedules,
                     modifier = Modifier.fillMaxSize().padding(bottom = bottomPadding),
                 )
-                mergedSchedule != null -> HomeContent(viewModel, mergedSchedule, bottomPadding)
+                mergedSchedule != null -> HomeContent(
+                    viewModel,
+                    mergedSchedule,
+                    bottomPadding,
+                    focusRequest,
+                    onFocusHandled = { focusRequest = 0 },
+                )
                 else -> LoadingPane("正在合并已订阅赛事", Modifier.fillMaxSize())
-            }
-            if (pendingUpdate) {
-                TextButton("赛程已更新，点击查看", onClick = { displayedSchedule = mergedSchedule },
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
             }
         }
     }
 }
 
 private class EsportPageRequest(val esport: Esport)
+private data class EsportFocusRequest(val esport: Esport, val id: Int)
 
 @Composable
 private fun EventsSectionContent(
@@ -243,11 +322,14 @@ private fun EventsSectionContent(
         initialPage = selectedEsportIndex,
         pageCount = { subscriptions.size },
     )
+    val pagerFlingBehavior = rememberMiaopuPagerFlingBehavior(pagerState)
     var pageRequest by remember { mutableStateOf<EsportPageRequest?>(null) }
     val visibleEsport = pageRequest?.esport ?: subscriptions.getOrNull(pagerState.currentPage)
         ?: subscriptions[selectedEsportIndex]
     var searchExpanded by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var focusRequest by remember { mutableStateOf<EsportFocusRequest?>(null) }
+    var focusRequestId by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(viewModel.selectedEsport, subscriptions) {
         val esport = viewModel.selectedEsport
@@ -260,11 +342,20 @@ private fun EventsSectionContent(
         val request = pageRequest ?: return@LaunchedEffect
         try {
             val targetPage = subscriptions.indexOf(request.esport)
-            if (targetPage >= 0) {
-                pagerState.animateScrollToPage(
-                    targetPage,
-                    animationSpec = tween(TabMotionDurationMillis, easing = TabMotionEasing),
-                )
+            if (targetPage >= 0 && targetPage != pagerState.currentPage) {
+                val distance = abs(targetPage - pagerState.currentPage)
+                if (distance == 1) {
+                    // Adjacent tabs animate: with neighbours pre-composed the slide is pure
+                    // translation, so it stays smooth.
+                    pagerState.animateScrollToPage(
+                        targetPage,
+                        animationSpec = tween(TabMotionDurationMillis, easing = TabMotionEasing),
+                    )
+                } else {
+                    // Distant tabs jump: animating would compose every page it passes through
+                    // and stutter; the tab indicator still animates so the switch reads clearly.
+                    pagerState.scrollToPage(targetPage)
+                }
             }
         } finally {
             // An interrupted animation must not clear a newer tap's destination.
@@ -303,20 +394,48 @@ private fun EventsSectionContent(
                 searchExpanded = expanded
                 if (!expanded) searchQuery = ""
             },
+            focusEnabled = (viewModel.cachedScheduleFor(visibleEsport)
+                ?: (viewModel.scheduleStateFor(visibleEsport) as? LoadState.Ready)?.value)
+                ?.liveOrUpcomingFocus(System.currentTimeMillis()) != null,
+            onFocusMatch = {
+                searchExpanded = false
+                searchQuery = ""
+                focusRequestId++
+                focusRequest = EsportFocusRequest(visibleEsport, focusRequestId)
+            },
         )
         HorizontalPager(
             state = pagerState,
+            flingBehavior = pagerFlingBehavior,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .clipToBounds(),
+            // Pre-compose every subscribed esport: with the default neighbour window, a wrap-around
+            // jump (re-tapping the Events tab) had to compose its target on the spot, freezing the
+            // frame for ~150ms. The lists are small, so composing all of them is cheap.
+            beyondViewportPageCount = subscriptions.size,
             key = { page -> subscriptions[page].businessId },
         ) { page ->
-            EventsPageContent(
-                viewModel = viewModel,
-                esport = subscriptions[page],
-                innerPadding = innerPadding,
-                searchQuery = searchQuery,
-            )
+            val pageEsport = subscriptions[page]
+            val pageFocusRequest = focusRequest?.takeIf { it.esport == pageEsport }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MiuixTheme.colorScheme.surface)
+                    .graphicsLayer { clip = true },
+            ) {
+                EventsPageContent(
+                    viewModel = viewModel,
+                    esport = pageEsport,
+                    innerPadding = innerPadding,
+                    searchQuery = searchQuery,
+                    focusRequest = pageFocusRequest?.id ?: 0,
+                    onFocusHandled = { handledId ->
+                        if (focusRequest?.id == handledId) focusRequest = null
+                    },
+                )
+            }
         }
     }
 }
@@ -325,6 +444,7 @@ private fun EventsSectionContent(
 private fun MainNavigationBar(
     selected: MainSection,
     onSelect: (MainSection) -> Unit,
+    onCycleEvents: () -> Unit,
 ) {
     NavigationBar(showDivider = false) {
         NavigationBarItem(
@@ -335,7 +455,10 @@ private fun MainNavigationBar(
         )
         NavigationBarItem(
             selected = selected == MainSection.EVENTS,
-            onClick = { onSelect(MainSection.EVENTS) },
+            // Already on Events: repeated taps walk the sub-tabs instead of doing nothing.
+            onClick = {
+                if (selected == MainSection.EVENTS) onCycleEvents() else onSelect(MainSection.EVENTS)
+            },
             icon = LucideIcons.CalendarDays,
             label = "赛事",
         )
@@ -353,6 +476,8 @@ private fun HomeContent(
     viewModel: MiaopuViewModel,
     schedule: Schedule,
     bottomPadding: Dp,
+    focusRequest: Int,
+    onFocusHandled: () -> Unit,
 ) {
     val nowMillis = remember(schedule) { System.currentTimeMillis() }
     val homeSchedule = remember(schedule, nowMillis) { schedule.homeWindowAround(nowMillis) }
@@ -370,6 +495,13 @@ private fun HomeContent(
     LaunchedEffect(homeSchedule, listState) {
         val lastIndex = (homeSchedule.days.sumOf { 1 + it.matches.size } - 1).coerceAtLeast(0)
         if (listState.firstVisibleItemIndex > lastIndex) listState.scrollToItem(lastIndex)
+    }
+    LaunchedEffect(focusRequest) {
+        if (focusRequest == 0) return@LaunchedEffect
+        homeSchedule.liveOrUpcomingFocus(System.currentTimeMillis())?.let { target ->
+            listState.scrollToItem(target.itemIndex)
+        }
+        onFocusHandled()
     }
 
     LazyColumn(
@@ -408,6 +540,8 @@ internal fun EventsContent(
     schedule: Schedule,
     esport: Esport,
     bottomPadding: Dp,
+    focusRequest: Int,
+    onFocusHandled: (Int) -> Unit,
 ) {
     if (schedule.days.isEmpty()) {
         EmptyPane("暂无赛程数据", Modifier.fillMaxSize().padding(bottom = bottomPadding))
@@ -457,6 +591,14 @@ internal fun EventsContent(
         if (schedule.days.none { it.date == selectedDayKey }) {
             selectedDayKey = schedule.days.getOrNull(initialDayIndex)?.date.orEmpty()
         }
+    }
+    LaunchedEffect(focusRequest) {
+        if (focusRequest == 0) return@LaunchedEffect
+        schedule.liveOrUpcomingFocus(System.currentTimeMillis())?.let { target ->
+            listState.scrollToItem(target.itemIndex)
+            selectedDayKey = schedule.days[target.dayIndex].date
+        }
+        onFocusHandled(focusRequest)
     }
 
     DisposableEffect(esport, schedule, listState) {
@@ -513,15 +655,30 @@ internal fun EventsContent(
 }
 
 @Composable
-private fun HomeHeader(viewModel: MiaopuViewModel) {
+private fun HomeHeader(
+    viewModel: MiaopuViewModel,
+    focusEnabled: Boolean,
+    onFocusMatch: () -> Unit,
+) {
     PageHeading(
         title = "近期赛程",
         actions = {
-            IconButton(
-                onClick = viewModel::refreshHomeSchedules,
-                backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
-            ) {
-                Icon(LucideIcons.RefreshCw, contentDescription = "刷新赛程")
+            Row {
+                IconButton(
+                    onClick = onFocusMatch,
+                    enabled = focusEnabled,
+                    backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
+                ) {
+                    Icon(LucideIcons.LocateFixed, contentDescription = "定位进行中或即将开始的比赛")
+                }
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = viewModel::manualRefreshHomeSchedules,
+                    enabled = !viewModel.isRefreshing,
+                    backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
+                ) {
+                    RefreshIcon(spinning = viewModel.isRefreshing)
+                }
             }
         },
     )
@@ -536,6 +693,8 @@ private fun EventsHeader(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     onSearchExpandedChange: (Boolean) -> Unit,
+    focusEnabled: Boolean,
+    onFocusMatch: () -> Unit,
 ) {
     PageHeading(
         title = "完整赛程",
@@ -552,10 +711,19 @@ private fun EventsHeader(
                 }
                 Spacer(Modifier.width(8.dp))
                 IconButton(
-                    onClick = viewModel::refreshSchedule,
+                    onClick = onFocusMatch,
+                    enabled = focusEnabled,
                     backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
                 ) {
-                    Icon(LucideIcons.RefreshCw, contentDescription = "刷新赛程")
+                    Icon(LucideIcons.LocateFixed, contentDescription = "定位进行中或即将开始的比赛")
+                }
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = viewModel::manualRefreshSchedule,
+                    enabled = !viewModel.isRefreshing,
+                    backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
+                ) {
+                    RefreshIcon(spinning = viewModel.isRefreshing)
                 }
             }
         },
@@ -596,6 +764,7 @@ private fun EsportSelector(
 @Composable
 private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValues) {
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = pagePadding(innerPadding),
@@ -674,6 +843,65 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                         fontWeight = FontWeight.Bold,
                     )
                     Icon(LucideIcons.ChevronRight, null, Modifier.size(16.dp), tint = MiuixTheme.colorScheme.primary)
+                }
+            }
+        }
+        item { SectionHeading("桌面小组件") }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                insideMargin = PaddingValues(18.dp),
+                cornerRadius = 20.dp,
+            ) {
+                Text("添加到桌面", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "点一下直接加到桌面，不弹确认框；之后长按可拖到想要的位置。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { viewModel.addWidget(PinnableWidget.SCHEDULE) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(LucideIcons.CalendarDays, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("近期赛程")
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Button(
+                        onClick = { viewModel.addWidget(PinnableWidget.MATCH) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(LucideIcons.Star, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("单场赛况")
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                // HyperOS 用自家 app-op「桌面快捷方式」拦添加，应用内没法自己开，只能把人送到权限页。
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { WidgetPinner.openShortcutPermissionPage(context) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "添加没反应？开启「桌面快捷方式」权限",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.primary,
+                    )
+                    Icon(
+                        LucideIcons.ChevronRight,
+                        null,
+                        Modifier.size(16.dp),
+                        tint = MiuixTheme.colorScheme.primary,
+                    )
                 }
             }
         }

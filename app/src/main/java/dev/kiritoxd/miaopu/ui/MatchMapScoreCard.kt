@@ -35,7 +35,7 @@ internal fun MatchMapScoreCard(teams: List<StatsTeam>) {
 @Composable
 private fun MapScoreTeam(team: StatsTeam, modifier: Modifier, arrangement: Arrangement.Horizontal) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = arrangement) {
-        team.logoUrl?.let { AsyncImage(it, null, Modifier.size(28.dp)) }
+        team.logoUrl?.let { LogoImage(it, Modifier.size(28.dp)) }
         Spacer(Modifier.width(6.dp))
         Text(team.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 2, overflow = TextOverflow.Ellipsis)

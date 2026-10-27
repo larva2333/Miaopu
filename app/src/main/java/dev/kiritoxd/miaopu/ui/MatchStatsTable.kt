@@ -44,7 +44,7 @@ internal fun MatchStatsTable(team: StatsTeam, scroll: ScrollState = rememberScro
                     Row(Modifier.fillMaxWidth().height(headerHeight).background(headerColor)
                         .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        team.logoUrl?.let { AsyncImage(it, null, Modifier.size(24.dp)) }
+                        team.logoUrl?.let { LogoImage(it, Modifier.size(24.dp)) }
                         Text(team.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             maxLines = 2, lineHeight = 14.sp, overflow = TextOverflow.Ellipsis)
                     }

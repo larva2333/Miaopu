@@ -31,6 +31,38 @@ fun mergeSchedules(schedules: Iterable<Schedule>): Schedule {
     return Schedule(anchorMatchId = null, days = days)
 }
 
+data class ScheduleFocusTarget(
+    val match: MatchSummary,
+    val dayIndex: Int,
+    val itemIndex: Int,
+)
+
+/** Returns the live or next match together with its flattened schedule item position. */
+fun Schedule.liveOrUpcomingFocus(nowMillis: Long): ScheduleFocusTarget? {
+    val matches = days.flatMap(ScheduleDay::matches)
+    val target = matches.filter(MatchSummary::isLive).minWithOrNull(matchTimeOrder)
+        ?: matches
+            .filter { match -> !match.isTerminal && match.startTimeMillis >= nowMillis }
+            .minWithOrNull(matchTimeOrder)
+        ?: return null
+
+    var itemIndex = 0
+    days.forEachIndexed { dayIndex, day ->
+        val matchIndex = day.matches.indexOfFirst { match ->
+            match.id == target.id && match.esport == target.esport
+        }
+        if (matchIndex >= 0) {
+            return ScheduleFocusTarget(
+                match = day.matches[matchIndex],
+                dayIndex = dayIndex,
+                itemIndex = itemIndex + matchIndex + 1,
+            )
+        }
+        itemIndex += 1 + day.matches.size
+    }
+    return null
+}
+
 /**
  * Builds the home feed from the five-day local-date window centered on today.
  * Every match from two days ago through two days ahead is retained.

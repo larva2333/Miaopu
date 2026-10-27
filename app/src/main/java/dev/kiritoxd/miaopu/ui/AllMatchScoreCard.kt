@@ -47,9 +47,9 @@ internal fun AllMatchScoreCard(scores: MatchAllScores) {
 @Composable
 private fun ScoreTeamHeading(team: ScoredTeam, right: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (!right && team.logoUrl != null) AsyncImage(team.logoUrl, null, Modifier.size(22.dp))
+        if (!right && team.logoUrl != null) LogoImage(team.logoUrl, Modifier.size(22.dp))
         Text(team.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        if (right && team.logoUrl != null) AsyncImage(team.logoUrl, null, Modifier.size(22.dp))
+        if (right && team.logoUrl != null) LogoImage(team.logoUrl, Modifier.size(22.dp))
     }
 }
 

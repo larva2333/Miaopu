@@ -208,6 +208,49 @@ class ScheduleFocusTest {
     }
 
     @Test
+    fun `live or upcoming focus prefers live and reports its list position`() {
+        val schedule = scheduleOf(
+            day("2026-08-23", match("ended", "已结束", time(23, 10))),
+            day(
+                "2026-08-24",
+                match("next", "未开始", time(24, 18)),
+                match("live", "进行中", time(24, 15)),
+            ),
+        )
+
+        val target = requireNotNull(schedule.liveOrUpcomingFocus(time(24, 16)))
+
+        assertEquals("live", target.match.id)
+        assertEquals(1, target.dayIndex)
+        assertEquals(4, target.itemIndex)
+    }
+
+    @Test
+    fun `live or upcoming focus uses the earliest next match`() {
+        val schedule = scheduleOf(
+            day(
+                "2026-08-24",
+                match("later", "未开始", time(24, 21)),
+                match("next", "未开始", time(24, 18)),
+            ),
+        )
+
+        val target = requireNotNull(schedule.liveOrUpcomingFocus(time(24, 16)))
+
+        assertEquals("next", target.match.id)
+        assertEquals(2, target.itemIndex)
+    }
+
+    @Test
+    fun `live or upcoming focus is absent when all matches ended`() {
+        val schedule = scheduleOf(
+            day("2026-08-24", match("ended", "已结束", time(24, 10))),
+        )
+
+        assertEquals(null, schedule.liveOrUpcomingFocus(time(24, 16)))
+    }
+
+    @Test
     fun `merge deduplicates the same hupu unique key across sources`() {
         val primary = match("primary-id", "已结束", time(24, 10), uniqueKey = "common_match:42")
         val supplement = match("supplement-id", "已结束", time(24, 10), uniqueKey = "common_match:42")

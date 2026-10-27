@@ -2,6 +2,7 @@ package dev.kiritoxd.miaopu.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -74,26 +76,33 @@ internal fun ScheduleDateScrollBar(
         val trackHeight = (
             maxHeight - trackPadding.calculateTopPadding() - trackPadding.calculateBottomPadding()
             ).coerceAtLeast(0.dp)
-        val visibleFraction = if (adapter.contentSize <= 0.0) {
-            1f
+        // Scroll offsets change on every frame. Read them only while the date bubble is visible,
+        // otherwise the full schedule subtree would recompose throughout an ordinary fling.
+        val bubbleOffset = if (isDragging) {
+            val visibleFraction = if (adapter.contentSize <= 0.0) {
+                1f
+            } else {
+                (adapter.viewportSize / adapter.contentSize).toFloat().coerceIn(0f, 1f)
+            }
+            val thumbHeight = (trackHeight * visibleFraction)
+                .coerceAtLeast(ScrollBarDefaults.ThumbMinLength)
+                .coerceAtMost(trackHeight)
+            val maxScrollOffset = (adapter.contentSize - adapter.viewportSize).coerceAtLeast(0.0)
+            val scrollFraction = if (maxScrollOffset == 0.0) {
+                0f
+            } else {
+                (adapter.scrollOffset / maxScrollOffset).toFloat().coerceIn(0f, 1f)
+            }
+            val bubbleHeight = 40.dp
+            val thumbOffset =
+                trackPadding.calculateTopPadding() + (trackHeight - thumbHeight) * scrollFraction
+            (thumbOffset + thumbHeight / 2 - bubbleHeight / 2).coerceIn(
+                0.dp,
+                (maxHeight - bubbleHeight).coerceAtLeast(0.dp),
+            )
         } else {
-            (adapter.viewportSize / adapter.contentSize).toFloat().coerceIn(0f, 1f)
+            0.dp
         }
-        val thumbHeight = (trackHeight * visibleFraction)
-            .coerceAtLeast(ScrollBarDefaults.ThumbMinLength)
-            .coerceAtMost(trackHeight)
-        val maxScrollOffset = (adapter.contentSize - adapter.viewportSize).coerceAtLeast(0.0)
-        val scrollFraction = if (maxScrollOffset == 0.0) {
-            0f
-        } else {
-            (adapter.scrollOffset / maxScrollOffset).toFloat().coerceIn(0f, 1f)
-        }
-        val bubbleHeight = 40.dp
-        val thumbOffset = trackPadding.calculateTopPadding() + (trackHeight - thumbHeight) * scrollFraction
-        val bubbleOffset = (thumbOffset + thumbHeight / 2 - bubbleHeight / 2).coerceIn(
-            0.dp,
-            (maxHeight - bubbleHeight).coerceAtLeast(0.dp),
-        )
 
         VerticalScrollBar(
             adapter = adapter,
@@ -226,92 +235,123 @@ internal fun ScheduleDayBand(day: ScheduleDay, isFocused: Boolean) {
 
 @Composable
 internal fun HupuScheduleMatchCard(match: MatchSummary, onClick: () -> Unit) {
-    Card(
+    val scheme = MiuixTheme.colorScheme
+    // Live matches get a tinted card so they read first; finished ones recede to grey.
+    val finished = match.isTerminal
+    val live = match.isLive
+    val mutedColor = scheme.onSurfaceVariantSummary
+    // A flat page-coloured fill made the card melt into the background, so keep it one step
+    // darker than the page and add a hairline ring - recessed, but the block stays readable.
+    val finishedFill = lerp(scheme.surface, scheme.onSurface, 0.05f)
+    val finishedBorder = lerp(scheme.surface, scheme.onSurface, 0.10f)
+    val liveFill = lerp(scheme.surface, scheme.primary, 0.14f)
+    val cardShape = RoundedCornerShape(16.dp)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .semantics {
-                role = Role.Button
-                contentDescription = "查看 ${match.name.ifBlank { match.teams.joinToString(" 对 ") { it.name } }}"
-            },
-        insideMargin = PaddingValues(horizontal = 14.dp, vertical = 13.dp),
-        cornerRadius = 16.dp,
-        onClick = onClick,
-        pressFeedbackType = PressFeedbackType.Sink,
-        showIndication = true,
+            .then(
+                if (finished) {
+                    Modifier.border(width = 1.dp, color = finishedBorder, shape = cardShape)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics {
+                    role = Role.Button
+                    contentDescription = "查看 ${match.name.ifBlank { match.teams.joinToString(" 对 ") { it.name } }}"
+                },
+            insideMargin = PaddingValues(horizontal = 14.dp, vertical = 13.dp),
+            cornerRadius = 16.dp,
+            colors = when {
+                live -> CardDefaults.defaultColors(color = liveFill, contentColor = scheme.onSurface)
+                finished -> CardDefaults.defaultColors(color = finishedFill, contentColor = mutedColor)
+                else -> CardDefaults.defaultColors()
+            },
+            onClick = onClick,
+            pressFeedbackType = PressFeedbackType.Sink,
+            showIndication = true,
         ) {
-            Column(Modifier.width(76.dp)) {
-                Text(
-                    text = match.startTimeLabel.ifBlank { "待定" },
-                    style = MiuixTheme.textStyles.body1,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = match.introduction.ifBlank { match.name },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-
-            Spacer(Modifier.width(10.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(7.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (match.teams.isEmpty()) {
+                Column(Modifier.width(76.dp)) {
                     Text(
-                        text = match.name,
+                        text = match.startTimeLabel.ifBlank { "待定" },
+                        style = MiuixTheme.textStyles.body1,
+                        fontWeight = FontWeight.Bold,
+                        color = if (finished) mutedColor else Color.Unspecified,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = match.introduction.ifBlank { match.name },
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Bold,
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = mutedColor,
                     )
-                } else {
-                    val visibleTeams = match.teams.take(2)
-                    val hasWinner = visibleTeams.any { it.winner }
-                    visibleTeams.forEach { team ->
-                        ScheduleTeamLine(
-                            team = team,
-                            isLoser = hasWinner && !team.winner,
+                }
+
+                Spacer(Modifier.width(10.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    if (match.teams.isEmpty()) {
+                        Text(
+                            text = match.name,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.Bold,
+                            color = if (finished) mutedColor else Color.Unspecified,
                         )
+                    } else {
+                        val visibleTeams = match.teams.take(2)
+                        val hasWinner = visibleTeams.any { it.winner }
+                        visibleTeams.forEach { team ->
+                            ScheduleTeamLine(
+                                team = team,
+                                isLoser = hasWinner && !team.winner,
+                                finished = finished,
+                            )
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .height(54.dp)
-                    .background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.22f)),
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(
-                modifier = Modifier.width(70.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                Text(
-                    text = match.status.ifBlank { "待定" },
-                    maxLines = 1,
-                    style = MiuixTheme.textStyles.body2,
-                    color = statusColor(match),
-                    fontWeight = if (match.isLive) FontWeight.Bold else FontWeight.Normal,
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(54.dp)
+                        .background(mutedColor.copy(alpha = if (finished) 0.12f else 0.22f)),
                 )
-                match.scoreCountText?.takeIf { it.isNotBlank() }?.let { scoreCount ->
-                    Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(
+                    modifier = Modifier.width(70.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
                     Text(
-                        text = scoreCount,
+                        text = match.status.ifBlank { "待定" },
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        style = MiuixTheme.textStyles.body2,
+                        color = statusColor(match),
+                        fontWeight = if (match.isLive) FontWeight.Bold else FontWeight.Normal,
                     )
+                    match.scoreCountText?.takeIf { it.isNotBlank() }?.let { scoreCount ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = scoreCount,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = mutedColor,
+                        )
+                    }
                 }
             }
         }
@@ -319,7 +359,14 @@ internal fun HupuScheduleMatchCard(match: MatchSummary, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ScheduleTeamLine(team: Team, isLoser: Boolean) {
+private fun ScheduleTeamLine(team: Team, isLoser: Boolean, finished: Boolean) {
+    val scheme = MiuixTheme.colorScheme
+    // Score is the only saturated element: winner in blue, loser in red, no bold type scale.
+    val scoreColor = when {
+        team.winner -> scheme.primary
+        isLoser -> scheme.error
+        else -> scheme.onSurfaceVariantSummary
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         TeamLogo(team = team, size = 28.dp)
         Spacer(Modifier.width(8.dp))
@@ -329,27 +376,29 @@ private fun ScheduleTeamLine(team: Team, isLoser: Boolean) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = MiuixTheme.textStyles.body2,
-            fontWeight = if (team.winner) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = FontWeight.Normal,
+            color = if (finished) scheme.onSurfaceVariantSummary else Color.Unspecified,
         )
         Text(
             text = team.score ?: "—",
             modifier = Modifier.width(36.dp),
             style = MiuixTheme.textStyles.body1,
-            color = if (isLoser) {
-                MiuixTheme.colorScheme.onSurfaceVariantSummary
-            } else {
-                Color.Unspecified
-            },
-            fontWeight = FontWeight.Bold,
+            color = scoreColor,
+            fontWeight = FontWeight.Normal,
             maxLines = 1,
-            textAlign = TextAlign.End,
+            // Centre within the fixed column: right-aligning makes narrow glyphs like "1" sit
+            // visibly right of wider ones like "0" on the row above.
+            textAlign = TextAlign.Center,
         )
     }
 }
 
 @Composable
 private fun statusColor(match: MatchSummary): Color = when {
-    match.isLive -> MiuixTheme.colorScheme.error
+    // Same blue as the selected sub-tab, so "进行中" reads as the app's accent rather than an alert.
+    match.isLive -> MiuixTheme.colorScheme.primary
     match.isTerminal -> MiuixTheme.colorScheme.onSurfaceVariantSummary
     else -> MiuixTheme.colorScheme.onSurface
 }
+
+
