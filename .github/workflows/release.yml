@@ -5,6 +5,9 @@ on:
     tags:
       - "[0-9]+.[0-9]+"
       - "[0-9]+.[0-9]+.[0-9]+"
+  # Forks do not get tag-push events, so the same job can be started by hand:
+  #   gh workflow run release.yml -R <owner>/<repo> --ref 2.3.4
+  workflow_dispatch:
 
 permissions:
   contents: write
