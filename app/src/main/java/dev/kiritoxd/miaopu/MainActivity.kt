@@ -9,7 +9,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import dev.kiritoxd.miaopu.notify.MatchAlertReceiver
+import dev.kiritoxd.miaopu.notify.MatchAlerts
 import dev.kiritoxd.miaopu.widget.WidgetUpdates
 import androidx.activity.viewModels
 import dev.kiritoxd.miaopu.ui.MiaopuApp
@@ -27,18 +31,31 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         if (Build.VERSION.SDK_INT >= 28) window.navigationBarDividerColor = Color.TRANSPARENT
         if (savedInstanceState == null) handleWidgetIntent(intent)
+        handlePreviewIntent(intent)
         setContent { MiaopuApp(viewModel) }
     }
 
     override fun onStart() {
         super.onStart()
-        lifecycleScope.launch { WidgetUpdates.onAppForeground(applicationContext) }
+        lifecycleScope.launch {
+            WidgetUpdates.onAppForeground(applicationContext)
+            // Alarms are rebuilt on every foreground visit so a cached schedule is enough to arm them.
+            withContext(Dispatchers.IO) { MatchAlerts.reschedule(applicationContext) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWidgetIntent(intent)
+        handlePreviewIntent(intent)
+    }
+
+    /** Lets adb post a sample reminder without waiting for a kickoff. */
+    private fun handlePreviewIntent(intent: Intent?) {
+        if (intent?.action != MatchAlertReceiver.ACTION_PREVIEW) return
+        intent.action = null
+        MatchAlertReceiver.preview(applicationContext)
     }
 
     private fun handleWidgetIntent(intent: Intent) {

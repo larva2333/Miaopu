@@ -73,7 +73,7 @@ class GitHubReleaseAdapter {
     }
 
     companion object {
-        const val REPOSITORY_URL = "https://github.com/KiritoXDone/Miaopu"
+        const val REPOSITORY_URL = "https://github.com/larva2333/Miaopu"
         const val LATEST_RELEASE_API = "https://api.github.com/repos/KiritoXDone/Miaopu/releases/latest"
     }
 }

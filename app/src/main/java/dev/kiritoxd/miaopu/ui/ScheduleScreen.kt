@@ -1,6 +1,11 @@
 package dev.kiritoxd.miaopu.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
@@ -79,6 +84,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -765,6 +771,25 @@ private fun EsportSelector(
 private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValues) {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
+    val notificationPermissionGranted = Build.VERSION.SDK_INT < 33 ||
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    // Android 13+ needs the runtime permission before the first reminder can be posted.
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            viewModel.setMatchAlerts(true)
+        } else {
+            Toast.makeText(context, "没有通知权限，开赛提醒发不出来", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val toggleMatchAlerts: (Boolean) -> Unit = { enabled ->
+        when {
+            !enabled -> viewModel.setMatchAlerts(false)
+            notificationPermissionGranted -> viewModel.setMatchAlerts(true)
+            else -> notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = pagePadding(innerPadding),
@@ -843,6 +868,33 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                         fontWeight = FontWeight.Bold,
                     )
                     Icon(LucideIcons.ChevronRight, null, Modifier.size(16.dp), tint = MiuixTheme.colorScheme.primary)
+                }
+            }
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+                insideMargin = PaddingValues(18.dp),
+                cornerRadius = 20.dp,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("开赛提醒", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "订阅的赛事开始时，发一条通知提醒你",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = viewModel.matchAlertsEnabled,
+                        onCheckedChange = toggleMatchAlerts,
+                        enabled = true,
+                    )
                 }
             }
         }
@@ -937,8 +989,8 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
         item {
             ProfileActionCard(
                 title = "关于",
-                summary = "github.com/KiritoXDone/Miaopu · ${viewModel.currentVersion}",
-                action = "查看",
+                summary = "github.com/larva2333/Miaopu",
+                action = "打开",
                 onClick = { uriHandler.openUri(viewModel.repositoryUrl) },
             )
         }

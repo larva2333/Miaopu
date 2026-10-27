@@ -28,6 +28,7 @@ import dev.kiritoxd.miaopu.data.Schedule
 import dev.kiritoxd.miaopu.data.StageRatingDetail
 import dev.kiritoxd.miaopu.data.mergeCommentsByHeat
 import dev.kiritoxd.miaopu.data.isNewerVersion
+import dev.kiritoxd.miaopu.notify.MatchAlerts
 import dev.kiritoxd.miaopu.widget.WidgetUpdates
 import dev.kiritoxd.miaopu.widget.PinnableWidget
 import dev.kiritoxd.miaopu.widget.WidgetPinner
@@ -113,6 +114,8 @@ class MiaopuViewModel(
     var lastCommentSubmissionSucceeded: Boolean by mutableStateOf(false)
         private set
     var message: String? by mutableStateOf(null)
+        private set
+    var matchAlertsEnabled: Boolean by mutableStateOf(MatchAlerts.isEnabled(application))
         private set
     var updateCheckState: UpdateCheckState by mutableStateOf(UpdateCheckState.Idle)
         private set
@@ -344,6 +347,17 @@ class MiaopuViewModel(
                 after > before -> "已添加到桌面，回到桌面即可看到；长按可调整位置"
                 else -> "系统拦下了添加：请点上方「开启桌面快捷方式权限」允许后再试"
             }
+        }
+    }
+
+    /** Kickoff reminders for every subscribed esport; alarms are rebuilt from the cached schedule. */
+    fun setMatchAlerts(enabled: Boolean) {
+        if (matchAlertsEnabled == enabled) return
+        matchAlertsEnabled = enabled
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { MatchAlerts.setEnabled(app, enabled) }
+            message = if (enabled) "已开启开赛提醒，订阅赛事的比赛开始时通知你" else "已关闭开赛提醒"
         }
     }
 
@@ -621,7 +635,10 @@ class MiaopuViewModel(
             (nextState as? LoadState.Ready)?.value?.let { schedules[esport] = it }
             updateScheduleState(esport, nextState)
             scheduleJobs.remove(esport)
-            WidgetUpdates.publish(getApplication(), esport, (nextState as? LoadState.Ready)?.value, startedAt)
+            val app = getApplication<Application>()
+            WidgetUpdates.publish(app, esport, (nextState as? LoadState.Ready)?.value, startedAt)
+            // Fresh schedule data means the alarm set must be rebuilt (new or moved kickoffs).
+            withContext(Dispatchers.IO) { MatchAlerts.reschedule(app) }
         }
         scheduleJobs[esport] = scheduleJob
         scheduleJob.start()
