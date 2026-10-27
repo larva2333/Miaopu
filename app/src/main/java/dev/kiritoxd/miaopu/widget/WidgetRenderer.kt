@@ -8,8 +8,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
-import android.text.style.SuperscriptSpan
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -176,13 +176,15 @@ internal object WidgetRenderer {
 
     private fun row(context: Context, id: Int, match: WidgetMatch, now: Long, largeFont: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_row)
+        val upcoming = !match.live && !match.terminal
         views.setTextViewText(R.id.widget_row_status, when {
             match.live -> if (largeFont) match.status else "● ${match.status}"
             match.terminal -> match.status
-            else -> match.widgetTime(now)
+            else -> match.widgetTime(now, context)
         })
+        // Upcoming rows carry a second, smaller day line ("今天"/date) under the clock.
+        views.setInt(R.id.widget_row_status, "setMaxLines", if (upcoming) 2 else 1)
         views.textColor(context, R.id.widget_row_status, if (match.live) R.color.widget_accent else R.color.widget_text)
-        views.setInt(R.id.widget_row_status, "setMaxLines", 1)
         views.setViewVisibility(R.id.widget_row_sport, View.VISIBLE)
         views.setTextViewText(R.id.widget_row_sport, match.sportLabel)
         val scoreLabel = match.scoreLabel()
@@ -197,16 +199,25 @@ internal object WidgetRenderer {
         return views
     }
 
-    private fun WidgetMatch.widgetTime(now: Long): CharSequence {
+    /** Clock on the first line, relative day ("今天"/"明天"/date) on a smaller second line. */
+    private fun WidgetMatch.widgetTime(now: Long, context: Context): CharSequence {
         val time = clockLabel()
-        val days = startDayOffset(now)
-        val suffix = if (days > 0) "+$days" else if (days < 0) days.toString() else ""
-        return SpannableString(time + suffix).apply {
-            if (suffix.isNotEmpty()) {
-                setSpan(SuperscriptSpan(), time.length, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                setSpan(RelativeSizeSpan(0.65f), time.length, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
+        val day = dayLabel(now)
+        return SpannableString("$time\n$day").apply {
+            setSpan(RelativeSizeSpan(0.72f), time.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(
+                ForegroundColorSpan(context.getColor(R.color.widget_secondary)),
+                time.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
         }
+    }
+
+    private fun WidgetMatch.dayLabel(now: Long): String = when (val days = startDayOffset(now)) {
+        0 -> "今天"
+        1 -> "明天"
+        2 -> "后天"
+        -1 -> "昨天"
+        else -> SimpleDateFormat("MM-dd", Locale.ROOT).format(Date(startsAt))
     }
 
     private fun bindTeams(context: Context, views: RemoteViews, match: WidgetMatch, wide: Boolean) {
