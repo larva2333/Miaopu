@@ -43,6 +43,28 @@ internal class CommentRepliesController(
         loadInitial(target, parentId, cardKey)
     }
 
+    /**
+     * Echoes a locally published reply into an expanded thread. The server hides
+     * freshly posted replies behind a moderation window, so without this the
+     * counter would say "1 条回复" while the list stayed empty.
+     */
+    fun addPendingReply(cardKey: String, reply: HupuComment) {
+        val entry = entries[cardKey] ?: return
+        val ready = entry.state as? LoadState.Ready ?: return
+        if (ready.value.comments.any { it.id == reply.id }) return
+        entries[cardKey] = entry.copy(
+            state = LoadState.Ready(
+                ready.value.copy(
+                    comments = listOf(reply) + ready.value.comments,
+                    totalCount = ready.value.totalCount + 1,
+                ),
+            ),
+        )
+    }
+
+    private fun carriedPending(cardKey: String): List<HupuComment> =
+        (entries[cardKey]?.state as? LoadState.Ready)?.value?.comments?.filter(HupuComment::pendingReview).orEmpty()
+
     fun loadMore(target: RatingTarget, cardKey: String) {
         val entry = entries[cardKey] ?: return
         if (entry.isLoadingMore) return
@@ -53,7 +75,7 @@ internal class CommentRepliesController(
         val generation = nextGeneration(cardKey)
         jobs[cardKey] = scope.launch {
             try {
-                val result = adapter.getCommentReplies(target, entry.parentCommentId, cursor)
+                val result = adapter.getCommentReplies(target, entry.parentCommentId, cursor, deeperPage = true)
                 if (generations[cardKey] != generation) return@launch
                 val latest = entries[cardKey]
                     ?.takeIf { it.parentCommentId == entry.parentCommentId }
@@ -102,6 +124,7 @@ internal class CommentRepliesController(
     private fun loadInitial(target: RatingTarget, parentId: String, cardKey: String) {
         jobs.remove(cardKey)?.cancel()
         val generation = nextGeneration(cardKey)
+        val pending = carriedPending(cardKey)
         entries[cardKey] = CommentRepliesEntry(
             parentCommentId = parentId,
             state = LoadState.Loading,
@@ -110,8 +133,14 @@ internal class CommentRepliesController(
             val result = adapter.getCommentReplies(target, parentId)
             if (generations[cardKey] != generation) return@launch
             val latest = entries[cardKey]?.takeIf { it.parentCommentId == parentId } ?: return@launch
+            val state = result.data?.let { page ->
+                // Keep locally echoed replies visible until the server actually
+                // publishes its own copy (an empty page means still moderating).
+                val merged = if (page.comments.isEmpty() && pending.isNotEmpty()) pending else emptyList()
+                if (merged.isEmpty()) page else page.copy(comments = merged, totalCount = maxOf(page.totalCount, merged.size))
+            }
             entries[cardKey] = latest.copy(
-                state = result.data?.let(LoadState<CommentPage>::Ready)
+                state = state?.let(LoadState<CommentPage>::Ready)
                     ?: LoadState.Failed(
                         message = result.error?.message ?: "展开回复失败",
                         retryable = result.error?.retryable == true,

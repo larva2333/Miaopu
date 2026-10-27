@@ -25,6 +25,7 @@ internal fun PlayerCommentCard(comment: HupuComment, actions: CommentActionsCont
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp).clickable(onClick = onReply),
         insideMargin = PaddingValues(14.dp), cornerRadius = 18.dp) {
         CommentRow(comment, actions = actions, onLike = onLike, onReply = onReply)
+        val replyTotal = maxOf(actions.replyCount(comment), comment.previewReplies.size)
         if (comment.previewReplies.isNotEmpty() || actions.replyCount(comment) > 0) {
             Column(Modifier.padding(start = 44.dp, top = 7.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
                 .background(MiuixTheme.colorScheme.surface).clickable(onClick = onReplies).padding(10.dp),
@@ -33,9 +34,12 @@ internal fun PlayerCommentCard(comment: HupuComment, actions: CommentActionsCont
                     Text("${it.author}：${it.content}", fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("查看全部 ${maxOf(actions.replyCount(comment), comment.previewReplies.size)} 条回复", fontSize = 12.sp, color = MiuixTheme.colorScheme.primary)
-                    Icon(LucideIcons.ChevronRight, null, Modifier.size(14.dp), tint = MiuixTheme.colorScheme.primary)
+                // A single reply that is already previewed needs no "查看全部 1 条回复" row.
+                if (shouldShowReplyToggle(replyTotal, comment.previewReplies.isNotEmpty(), expanded = false)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("查看全部 $replyTotal 条回复", fontSize = 12.sp, color = MiuixTheme.colorScheme.primary)
+                        Icon(LucideIcons.ChevronRight, null, Modifier.size(14.dp), tint = MiuixTheme.colorScheme.primary)
+                    }
                 }
             }
         }
@@ -56,7 +60,12 @@ internal fun CommentRow(comment: HupuComment, root: HupuComment? = null, actions
                     Text(comment.author, Modifier.weight(1f, fill = false), fontSize = 12.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val author = root?.authorId?.takeIf(String::isNotBlank)?.let { it == comment.authorId } == true
-                    val badge = if (author) "作者" else if (comment.score > 0) "${comment.score}分" else comment.badge?.name
+                    val badge = when {
+                        comment.pendingReview -> "审核中"
+                        author -> "作者"
+                        comment.score > 0 -> "${comment.score}分"
+                        else -> comment.badge?.name
+                    }
                     badge?.takeIf(String::isNotBlank)?.let {
                         Text(it, Modifier.padding(start = 5.dp).background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(5.dp))
                             .padding(horizontal = 5.dp, vertical = 1.dp), fontSize = 10.sp, color = MiuixTheme.colorScheme.primary)

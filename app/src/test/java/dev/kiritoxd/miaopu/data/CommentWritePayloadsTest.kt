@@ -17,11 +17,18 @@ class CommentWritePayloadsTest {
 
     @Test fun replyUsesRootParentAndBusinessKey() {
         val target = RatingTarget(null, "lol_item", "77174", "player", null, null, emptyList(), null, 0.0, 0, 0, 0, true, true, null, emptyMap())
-        val root = JSONObject(CommentWritePayloads.reply(target, "2986472970", " 回复内容 "))
+        val root = JSONObject(CommentWritePayloads.reply(target, "2986472970", " 回复内容 ", "372187670"))
         assertEquals("2986472970", root.getString("parentCommentId"))
+        assertEquals("2986472970", root.getString("rootCommentId"))
+        assertEquals("372187670", root.getString("subjectId"))
+        val parentKey = root.getJSONObject("parentCommentKey")
+        assertEquals("2986472970", parentKey.getString("commentId"))
+        assertEquals("372187670", parentKey.getString("subjectId"))
+        assertEquals("372187670:2986472970", parentKey.getString("key"))
         assertEquals("回复内容", root.getString("content"))
         assertEquals("77174", root.getJSONObject("outBizKey").getString("outBizNo"))
         assertEquals(0, root.getJSONArray("images").length())
         assertEquals(0, root.getJSONArray("ancillaryContents").length())
+        assertEquals("m", root.getString("source"))
     }
 }

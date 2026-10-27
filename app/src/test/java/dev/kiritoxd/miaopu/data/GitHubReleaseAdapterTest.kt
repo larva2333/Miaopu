@@ -25,6 +25,32 @@ class GitHubReleaseAdapterTest {
     }
 
     @Test
+    fun `release parser picks the apk asset for in-app download`() {
+        val release = parseGitHubRelease(
+            """
+                {
+                  "tag_name":"2.3.7",
+                  "html_url":"https://github.com/larva2333/Miaopu/releases/tag/2.3.7",
+                  "assets":[
+                    {"name":"Miaopu-2.3.7.apk.sha256","browser_download_url":"https://example.com/a.sha256","size":64},
+                    {"name":"Miaopu-2.3.7.apk","browser_download_url":"https://example.com/Miaopu-2.3.7.apk","size":1953330}
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        assertEquals("https://example.com/Miaopu-2.3.7.apk", release.apkUrl)
+        assertEquals(1953330L, release.apkSizeBytes)
+    }
+
+    @Test
+    fun `release without apk asset leaves download url empty`() {
+        val release = parseGitHubRelease("""{"tag_name":"2.3.7","html_url":"https://example.com"}""")
+
+        assertEquals(null, release.apkUrl)
+    }
+
+    @Test
     fun `version comparison accepts optional v prefix and missing patch`() {
         assertTrue(isNewerVersion("v1.1.0", "1.0"))
         assertTrue(isNewerVersion("1.0.1", "1.0"))

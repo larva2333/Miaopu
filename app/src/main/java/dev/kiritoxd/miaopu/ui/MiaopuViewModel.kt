@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import dev.kiritoxd.miaopu.BuildConfig
 import dev.kiritoxd.miaopu.data.AdapterResult
 import dev.kiritoxd.miaopu.data.AdapterStatus
+import dev.kiritoxd.miaopu.data.ApkInstaller
+import dev.kiritoxd.miaopu.data.AppUpdateDownloader
 import dev.kiritoxd.miaopu.data.CommentPage
 import dev.kiritoxd.miaopu.data.Esport
 import dev.kiritoxd.miaopu.data.EsportCatalog
@@ -41,6 +43,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import java.io.File
 
 sealed interface LoadState<out T> {
     data object Loading : LoadState<Nothing>
@@ -54,6 +57,14 @@ sealed interface UpdateCheckState {
     data class UpToDate(val latestTag: String) : UpdateCheckState
     data class Available(val release: GitHubRelease) : UpdateCheckState
     data class Failed(val message: String) : UpdateCheckState
+}
+
+/** In-app APK download lifecycle for the update card. */
+sealed interface UpdateDownloadState {
+    data object Idle : UpdateDownloadState
+    data class Downloading(val percent: Int) : UpdateDownloadState
+    data class Ready(val file: File) : UpdateDownloadState
+    data class Failed(val message: String) : UpdateDownloadState
 }
 
 enum class MainSection {
@@ -118,6 +129,8 @@ class MiaopuViewModel(
     var matchAlertsEnabled: Boolean by mutableStateOf(MatchAlerts.isEnabled(application))
         private set
     var updateCheckState: UpdateCheckState by mutableStateOf(UpdateCheckState.Idle)
+        private set
+    var updateDownloadState: UpdateDownloadState by mutableStateOf(UpdateDownloadState.Idle)
         private set
 
     val currentVersion: String get() = BuildConfig.VERSION_NAME
@@ -374,6 +387,46 @@ class MiaopuViewModel(
                 else -> UpdateCheckState.Failed(result.error?.message ?: "检查更新失败")
             }
         }
+    }
+
+    /** Downloads the release APK inside the app and immediately offers the system installer. */
+    fun downloadUpdate() {
+        val release = (updateCheckState as? UpdateCheckState.Available)?.release ?: return
+        if (updateDownloadState is UpdateDownloadState.Downloading) return
+        val url = release.apkUrl
+        if (url == null) {
+            message = "该版本未附带安装包，请在发布页手动下载"
+            return
+        }
+        updateDownloadState = UpdateDownloadState.Downloading(0)
+        viewModelScope.launch {
+            try {
+                val file = AppUpdateDownloader(getApplication())
+                    .download(url, "Miaopu-${release.tagName}.apk") { percent ->
+                        // Progress arrives on the download thread; publish on main and never go backwards.
+                        viewModelScope.launch {
+                            val shown = (updateDownloadState as? UpdateDownloadState.Downloading)?.percent ?: 0
+                            if (percent >= shown) updateDownloadState = UpdateDownloadState.Downloading(percent)
+                        }
+                    }
+                updateDownloadState = UpdateDownloadState.Ready(file)
+                installUpdate()
+            } catch (error: Exception) {
+                updateDownloadState = UpdateDownloadState.Failed(error.message ?: "下载失败")
+            }
+        }
+    }
+
+    /** Launches the system installer for the downloaded APK, asking for the install grant first. */
+    fun installUpdate() {
+        val ready = updateDownloadState as? UpdateDownloadState.Ready ?: return
+        val app = getApplication<Application>()
+        if (!ApkInstaller.canInstall(app)) {
+            message = "请允许「喵扑」安装未知应用，返回后再点安装"
+            ApkInstaller.requestInstallPermission(app)
+            return
+        }
+        if (!ApkInstaller.install(app, ready.file)) message = "无法启动安装器，请检查系统权限"
     }
 
     internal fun scheduleViewport(esport: Esport): ScheduleViewportSnapshot? = scheduleViewports[esport]

@@ -13,7 +13,7 @@ internal data class ReplyDraft(val text: String = "", val publishing: Boolean = 
 internal class CommentActionsController(
     private val scope: CoroutineScope,
     private val setLight: suspend (HupuComment, Boolean) -> AdapterResult<Unit>,
-    private val sendReply: suspend (RatingTarget, String, String) -> AdapterResult<Unit>,
+    private val sendReply: suspend (RatingTarget, String, String, String) -> AdapterResult<Unit>,
     private val onMessage: (String) -> Unit,
 ) {
     private val likes = mutableStateMapOf<String, CommentLikeState>()
@@ -47,7 +47,7 @@ internal class CommentActionsController(
         }
     }
 
-    fun publish(target: RatingTarget, parent: HupuComment, onSuccess: () -> Unit) {
+    fun publish(target: RatingTarget, parent: HupuComment, onSuccess: (HupuComment) -> Unit) {
         val current = draft(parent)
         if (current.publishing || current.text.isBlank() || parent.id.isBlank() || !target.canComment) return
         val id = key(parent)
@@ -55,12 +55,29 @@ internal class CommentActionsController(
         drafts[id] = current.copy(publishing = true, error = null)
         jobs.removeAll { it.isCompleted }
         jobs += scope.launch {
-            val result = sendReply(target, parent.id, current.text)
+            val result = sendReply(target, parent.id, parent.subjectId, current.text)
             if (token != generation) return@launch
             if (result.status == AdapterStatus.SUCCESS) {
+                // The server accepted the reply but hides it for a moderation window
+                // (~30 min). Echo it locally so the user sees it immediately.
+                val echoed = HupuComment(
+                    id = "pending-${System.currentTimeMillis()}",
+                    subjectId = parent.subjectId,
+                    author = "我",
+                    avatarUrl = null,
+                    content = current.text.trim(),
+                    date = "刚刚",
+                    location = null,
+                    score = 0,
+                    lightCount = 0,
+                    parentCommentId = parent.id,
+                    parentAuthor = parent.author,
+                    publishTime = System.currentTimeMillis(),
+                    pendingReview = true,
+                )
                 drafts[id] = ReplyDraft()
                 replyCounts[id] = replyCount(parent) + 1
-                onSuccess()
+                onSuccess(echoed)
             } else drafts[id] = current.copy(error = result.error?.message ?: "回复发送失败")
         }
     }

@@ -121,10 +121,10 @@ internal fun CommentRepliesSheet(viewModel: MiaopuViewModel, target: RatingTarge
                     onValueChange = { actions.updateDraft(replyTo, it) },
                     onSend = {
                         if (!viewModel.isLoggedIn) viewModel.openLogin()
-                        else actions.publish(target, replyTo) {
+                        else actions.publish(target, replyTo) { echoedReply ->
                             if (replyTo.id != parent.id) actions.recordThreadReply(parent)
                             selectedReply = null
-                            viewModel.commentReplies.retry(target, key)
+                            viewModel.commentReplies.addPendingReply(key, echoedReply)
                         }
                     },
                 )

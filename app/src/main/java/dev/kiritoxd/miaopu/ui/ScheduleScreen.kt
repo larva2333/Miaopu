@@ -960,28 +960,40 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
         item { SectionHeading("应用") }
         item {
             val updateState = viewModel.updateCheckState
-            val summary = when (updateState) {
-                UpdateCheckState.Idle -> "当前版本 ${viewModel.currentVersion}"
-                UpdateCheckState.Checking -> "正在查询 GitHub Release…"
-                is UpdateCheckState.UpToDate -> "已是最新版本 · ${updateState.latestTag}"
-                is UpdateCheckState.Available -> "发现新版本 ${updateState.release.tagName}"
-                is UpdateCheckState.Failed -> updateState.message
+            val download = viewModel.updateDownloadState
+            val summary = when {
+                download is UpdateDownloadState.Downloading -> "正在下载安装包 ${download.percent}%"
+                download is UpdateDownloadState.Ready -> "安装包已下载，点击安装"
+                download is UpdateDownloadState.Failed -> download.message
+                else -> when (updateState) {
+                    UpdateCheckState.Idle -> "当前版本 ${viewModel.currentVersion}"
+                    UpdateCheckState.Checking -> "正在查询 GitHub Release…"
+                    is UpdateCheckState.UpToDate -> "已是最新版本 · ${updateState.latestTag}"
+                    is UpdateCheckState.Available -> "发现新版本 ${updateState.release.tagName}"
+                    is UpdateCheckState.Failed -> updateState.message
+                }
             }
             ProfileActionCard(
                 title = "检查更新",
                 summary = summary,
-                action = when (updateState) {
-                    UpdateCheckState.Checking -> "检查中"
-                    is UpdateCheckState.Available -> "下载"
-                    is UpdateCheckState.Failed -> "重试"
+                action = when {
+                    download is UpdateDownloadState.Downloading -> "${download.percent}%"
+                    download is UpdateDownloadState.Ready -> "安装"
+                    download is UpdateDownloadState.Failed -> "重试"
+                    updateState == UpdateCheckState.Checking -> "检查中"
+                    updateState is UpdateCheckState.Available -> "下载"
+                    updateState is UpdateCheckState.Failed -> "重试"
                     else -> "检查"
                 },
-                enabled = updateState != UpdateCheckState.Checking,
+                enabled = updateState != UpdateCheckState.Checking && download !is UpdateDownloadState.Downloading,
                 onClick = {
-                    if (updateState is UpdateCheckState.Available) {
-                        uriHandler.openUri(updateState.release.pageUrl)
-                    } else {
-                        viewModel.checkForUpdates()
+                    when {
+                        download is UpdateDownloadState.Ready -> viewModel.installUpdate()
+                        download is UpdateDownloadState.Failed -> viewModel.downloadUpdate()
+                        updateState is UpdateCheckState.Available ->
+                            if (updateState.release.apkUrl == null) uriHandler.openUri(updateState.release.pageUrl)
+                            else viewModel.downloadUpdate()
+                        else -> viewModel.checkForUpdates()
                     }
                 },
             )

@@ -13,6 +13,8 @@ data class GitHubRelease(
     val title: String,
     val pageUrl: String,
     val publishedAt: String?,
+    val apkUrl: String? = null,
+    val apkSizeBytes: Long = 0L,
 )
 
 class GitHubReleaseAdapter {
@@ -74,7 +76,7 @@ class GitHubReleaseAdapter {
 
     companion object {
         const val REPOSITORY_URL = "https://github.com/larva2333/Miaopu"
-        const val LATEST_RELEASE_API = "https://api.github.com/repos/KiritoXDone/Miaopu/releases/latest"
+        const val LATEST_RELEASE_API = "https://api.github.com/repos/larva2333/Miaopu/releases/latest"
     }
 }
 
@@ -84,11 +86,21 @@ internal fun parseGitHubRelease(json: String): GitHubRelease {
         ?: error("Release 缺少 tag_name")
     val pageUrl = source.optString("html_url").takeIf(String::isNotBlank)
         ?: error("Release 缺少 html_url")
+    val apk = source.optJSONArray("assets")?.let { assets ->
+        (0 until assets.length())
+            .mapNotNull { assets.optJSONObject(it) }
+            .firstOrNull { asset ->
+                asset.optString("name").endsWith(".apk", ignoreCase = true) &&
+                    asset.optString("browser_download_url").isNotBlank()
+            }
+    }
     return GitHubRelease(
         tagName = tagName,
         title = source.optString("name").takeIf(String::isNotBlank) ?: tagName,
         pageUrl = pageUrl,
         publishedAt = source.optString("published_at").takeIf(String::isNotBlank),
+        apkUrl = apk?.optString("browser_download_url")?.takeIf(String::isNotBlank),
+        apkSizeBytes = apk?.optLong("size") ?: 0L,
     )
 }
 

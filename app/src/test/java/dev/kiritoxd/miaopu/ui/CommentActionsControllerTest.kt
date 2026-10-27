@@ -15,7 +15,7 @@ class CommentActionsControllerTest {
         val result = CompletableDeferred<AdapterResult<Unit>>()
         var calls = 0
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        val actions = CommentActionsController(scope, { _, _ -> calls++; result.await() }, { _, _, _ -> success() }, {})
+        val actions = CommentActionsController(scope, { _, _ -> calls++; result.await() }, { _, _, _, _ -> success() }, {})
         try {
             actions.toggleLike(comment)
             actions.toggleLike(comment)
@@ -30,7 +30,7 @@ class CommentActionsControllerTest {
         val selected = mutableListOf<Boolean>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
-            val actions = CommentActionsController(scope, { _, value -> selected += value; success() }, { _, _, _ -> success() }, {})
+            val actions = CommentActionsController(scope, { _, value -> selected += value; success() }, { _, _, _, _ -> success() }, {})
             actions.toggleLike(comment)
             actions.toggleLike(comment)
             assertEquals(listOf(true, false), selected)
@@ -42,8 +42,9 @@ class CommentActionsControllerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         var failed = true
         var refreshed = 0
+        var echoed: HupuComment? = null
         try {
-            val actions = CommentActionsController(scope, { _, _ -> success() }, { _, parent, text ->
+            val actions = CommentActionsController(scope, { _, _ -> success() }, { _, parent, _, text ->
                 assertEquals("comment", parent)
                 assertEquals("回复内容", text)
                 if (failed) failure() else success()
@@ -53,9 +54,13 @@ class CommentActionsControllerTest {
             assertEquals("回复内容", actions.draft(comment).text)
             assertNotNull(actions.draft(comment).error)
             failed = false
-            actions.publish(target, comment) { refreshed++ }
+            actions.publish(target, comment) { echoed = it; refreshed++ }
             assertEquals(ReplyDraft(), actions.draft(comment))
             assertEquals(1, refreshed)
+            assertNotNull(echoed)
+            assertTrue(echoed!!.pendingReview)
+            assertEquals("回复内容", echoed!!.content)
+            assertEquals("comment", echoed!!.parentCommentId)
         } finally { scope.cancel() }
     }
 
@@ -64,7 +69,7 @@ class CommentActionsControllerTest {
         val child = comment.copy(id = "child", author = "other", parentCommentId = comment.id)
         var sentParent: String? = null
         try {
-            val actions = CommentActionsController(scope, { _, _ -> success() }, { _, parent, _ ->
+            val actions = CommentActionsController(scope, { _, _ -> success() }, { _, parent, _, _ ->
                 sentParent = parent
                 success()
             }, {})
@@ -83,7 +88,7 @@ class CommentActionsControllerTest {
         val result = CompletableDeferred<AdapterResult<Unit>>()
         var refreshed = false
         try {
-            val actions = CommentActionsController(scope, { _, _ -> success() }, { _, _, _ -> result.await() }, {})
+            val actions = CommentActionsController(scope, { _, _ -> success() }, { _, _, _, _ -> result.await() }, {})
             actions.updateDraft(comment, "回复")
             actions.publish(target, comment) { refreshed = true }
             actions.clear()

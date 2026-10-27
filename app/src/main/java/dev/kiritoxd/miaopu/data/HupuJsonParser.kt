@@ -7,6 +7,9 @@ import java.util.Date
 import java.util.Locale
 
 object HupuJsonParser {
+    /** Guards against pathological reply nesting loops in server payloads. */
+    private const val MAX_REPLY_DEPTH = 32
+
     fun schedule(json: String, esport: Esport): Schedule {
         val result = JSONObject(json).requiredObject("result")
         val daysJson = result.optJSONArray("dayGameData") ?: JSONArray()
@@ -166,16 +169,52 @@ object HupuJsonParser {
         )
     }
 
-    fun comments(json: String): CommentPage {
-        val data = JSONObject(json).requiredObject("data")
+    /**
+     * Parses a primary comment page. `allowMissingData` covers the reply
+     * expansion endpoint, which answers `"data": null` for a thread that has
+     * no replies yet — that is an empty page, not an error.
+     */
+    fun comments(json: String, allowMissingData: Boolean = false, nestedReplies: Int = 1): CommentPage {
+        val data = JSONObject(json).optJSONObject("data")
+            ?: if (allowMissingData && JSONObject(json).optBoolean("success", false)) JSONObject()
+            else error("响应缺少 data")
         val commentsJson = data.optJSONArray("comments") ?: JSONArray()
-        val comments = parseComments(commentsJson)
+        val comments = parseComments(commentsJson, nestedReplies)
         return CommentPage(
             comments = comments,
             totalCount = data.optInt("commentCount", comments.size),
             nextPublishTime = data.optJSONObject("cursor")?.optLongOrNull("publishTime"),
             hasMore = data.optBoolean("hasMore", false),
         )
+    }
+
+    /**
+     * Parses the reply-expansion payload, where the server returns only the
+     * top-level replies of a thread and nests descendants inside each item's
+     * `subCommentList`. Flattening the whole tree makes every reply reachable
+     * and lets [commentThreadRows] rebuild the original nesting.
+     */
+    fun replyComments(json: String): CommentPage {
+        val page = comments(json, allowMissingData = true, nestedReplies = Int.MAX_VALUE)
+        val flattened = flattenReplyTree(page.comments)
+        return page.copy(
+            comments = flattened,
+            totalCount = maxOf(page.totalCount, flattened.size),
+        )
+    }
+
+    private fun flattenReplyTree(roots: List<HupuComment>): List<HupuComment> {
+        val seen = mutableSetOf<String>()
+        val result = mutableListOf<HupuComment>()
+        val stack = ArrayDeque<Pair<HupuComment, Int>>()
+        roots.asReversed().forEach { stack.addLast(it to 0) }
+        while (stack.isNotEmpty()) {
+            val (comment, depth) = stack.removeLast()
+            if (depth > MAX_REPLY_DEPTH || comment.id.isBlank() || !seen.add(comment.id)) continue
+            result += comment
+            comment.previewReplies.asReversed().forEach { stack.addLast(it to depth + 1) }
+        }
+        return result
     }
 
     fun hottestComments(json: String): List<HupuComment> {
@@ -328,7 +367,7 @@ object HupuJsonParser {
         )
     }
 
-    private fun parseComments(comments: JSONArray?): List<HupuComment> = buildList {
+    private fun parseComments(comments: JSONArray?, nestedReplies: Int = 1): List<HupuComment> = buildList {
         if (comments == null) return@buildList
         for (index in 0 until comments.length()) {
             val comment = comments.optJSONObject(index) ?: continue
@@ -346,7 +385,7 @@ object HupuJsonParser {
                     lightCount = comment.optInt("lightCount", 0),
                     imageUrls = media.filter { it.type.isNullOrBlank() || it.type == "IMAGE" }.map { it.url },
                     replyCount = comment.optInt("descendantCount", comment.optInt("subCommentCount", 0)),
-                    previewReplies = parseComments(comment.optJSONArray("subCommentList")).take(1),
+                    previewReplies = parseComments(comment.optJSONArray("subCommentList"), nestedReplies).take(nestedReplies),
                     parentCommentId = comment.stringOrNull("parentCommentId")?.takeUnless { it == "0" },
                     parentAuthor = comment.stringOrNull("parentCommentUserName"),
                     authorId = comment.stringOrNull("commentUserId"),

@@ -193,6 +193,8 @@ data class HupuComment(
     val prompt: String? = null,
     val chosenTags: List<String> = emptyList(),
     val highlightTexts: List<String> = emptyList(),
+    /** Marks a locally-echoed reply that the server has accepted but not yet published (moderation delay). */
+    val pendingReview: Boolean = false,
 )
 
 @Immutable

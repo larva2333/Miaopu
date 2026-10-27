@@ -187,21 +187,26 @@ class HupuAdapter(
 
     /**
      * Loads the replies hidden behind a score comment's “X 条回复” affordance.
-     * This mirrors Hupu's current inline expansion request rather than the
-     * unrelated BBS thread-reply API used by general forum clients.
+     * Hupu's own page expands a thread with `primarySingleRow/subCommentList`
+     * (the `getMore` variant only pages deeper and answers an empty page for a
+     * fresh thread), so the first page mirrors `subCommentList` while deeper
+     * pages continue with `getMore` anchored at the previous page's cursor.
      */
     suspend fun getCommentReplies(
         target: RatingTarget,
         parentCommentId: String,
-        publishTime: Long = INLINE_REPLY_INITIAL_CURSOR,
+        publishTime: Long = System.currentTimeMillis(),
+        deeperPage: Boolean = false,
     ): AdapterResult<CommentPage> {
-        val endpoint = "${HupuUrls.SCORE_BASE}/bplcommentapi/bpl/comment/list/primarySingleRow/getMore" +
+        val endpoint = "${HupuUrls.SCORE_BASE}/bplcommentapi/bpl/comment/list/primarySingleRow/" +
+            (if (deeperPage) "getMore" else "subCommentList") +
             "?publishTime=$publishTime" +
+            (if (deeperPage) "" else "&queryType=latest") +
             "&outBizType=${encode(target.outBizType)}&outBizNo=${encode(target.outBizNo)}" +
             "&parentCommentId=${encode(parentCommentId)}&pageSize=$INLINE_REPLY_PAGE_SIZE" +
             "&clientCode=&cid="
         return getAndParse(endpoint, "hupu.comments.replies.${target.outBizType}") {
-            HupuJsonParser.comments(it)
+            HupuJsonParser.replyComments(it)
         }
     }
 
@@ -250,15 +255,21 @@ class HupuAdapter(
             .put("subjectId", "")
             .put("source", "m")
             .toString()
-        val endpoint = "${HupuUrls.SCORE_BASE}/bplcommentapi/bpl/comment/m/publish"
-        val response = request(endpoint, "POST", body)
-        return withContext(Dispatchers.Default) {
-            response.toAdapterResult("hupu.comment.write", ::parseWriteResponse)
-        }
+        return writeCommentAction("publish", body, HupuUrls.COMMENT_LIGHT_BASE)
     }
 
-    suspend fun publishReply(target: RatingTarget, parentId: String, content: String): AdapterResult<Unit> =
-        writeCommentAction("publish", CommentWritePayloads.reply(target, parentId, content))
+    suspend fun publishReply(
+        target: RatingTarget,
+        parentId: String,
+        parentSubjectId: String,
+        content: String,
+    ): AdapterResult<Unit> =
+        writeCommentAction(
+            action = "publish",
+            body = CommentWritePayloads.reply(target, parentId, content, parentSubjectId),
+            baseUrl = HupuUrls.COMMENT_LIGHT_BASE,
+            source = "hupu.comment.publishReply",
+        )
 
     suspend fun setCommentLight(comment: HupuComment, light: Boolean): AdapterResult<Unit> =
         writeCommentAction(
@@ -271,8 +282,8 @@ class HupuAdapter(
         action: String,
         body: String,
         baseUrl: String = "https://games.mobileapi.hupu.com/1/8.2.58",
+        source: String = "hupu.comment.$action",
     ): AdapterResult<Unit> {
-        val source = "hupu.comment.$action"
         if (!cookieSession.isAuthenticated()) return AdapterResult.failure(
             source, AdapterStatus.AUTH_REQUIRED, "请先登录虎扑", false,
         )
@@ -291,8 +302,14 @@ class HupuAdapter(
         }
     }
 
+    /** HTTP 200 + code 401 / type LOGIN means the stored session is no longer accepted. */
+    private class WriteAuthRequired(message: String) : IllegalStateException(message)
+
     private fun parseWriteResponse(response: String) {
         val json = JSONObject(response)
+        if (json.optInt("code") == 401 || json.optString("type") == "LOGIN") {
+            throw WriteAuthRequired(json.optString("msg").ifBlank { "虎扑登录状态已失效" })
+        }
         if (json.optInt("code") != 1) error(json.optString("msg", "提交失败"))
     }
 
@@ -358,6 +375,8 @@ class HupuAdapter(
         AdapterResult.failure(source, AdapterStatus.TRANSIENT_FAILURE, error.message ?: "网络连接失败", true)
     } catch (error: CancellationException) {
         throw error
+    } catch (error: WriteAuthRequired) {
+        AdapterResult.failure(source, AdapterStatus.AUTH_REQUIRED, error.message ?: "虎扑登录状态已失效", false, status)
     } catch (error: Exception) {
         AdapterResult.failure(source, AdapterStatus.INVALID_RESPONSE, error.message ?: "虎扑响应格式已变化", false, status)
     }
@@ -378,7 +397,6 @@ class HupuAdapter(
 
     private companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Miaopu/1.0) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36"
-        const val INLINE_REPLY_INITIAL_CURSOR = 31_507_200_000L
         const val INLINE_REPLY_PAGE_SIZE = 20
         const val COMMON_SCHEDULE_CACHE_MILLIS = 60_000L
     }

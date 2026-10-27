@@ -140,6 +140,19 @@ class HupuJsonParserTest {
     }
 
     @Test
+    fun `reply page flattens nested sub comment trees`() {
+        val page = HupuJsonParser.replyComments(NESTED_REPLIES_JSON)
+
+        assertEquals(9, page.totalCount)
+        assertEquals(
+            listOf("root-a", "child-a1", "grand-a1", "child-a2", "root-b"),
+            page.comments.map { it.id },
+        )
+        assertEquals(5, page.comments.size)
+        assertEquals("child-a1", page.comments.first { it.id == "grand-a1" }.parentCommentId)
+    }
+
+    @Test
     fun `comment feed keeps official hottest first and preserves loaded order`() {
         val regular = HupuJsonParser.comments(COMMENTS_JSON).comments
         val hottest = HupuJsonParser.hottestComments(HOTTEST_COMMENTS_JSON)
@@ -255,6 +268,34 @@ class HupuJsonParserTest {
                     "parentCommentContent":"第一行<br/>第二行","parentCommentCanSee":true
                   }]
                 }]
+              }
+            }
+        """.trimIndent()
+
+        val NESTED_REPLIES_JSON = """
+            {
+              "code":1,
+              "data":{
+                "commentCount":9,
+                "hasMore":false,
+                "cursor":{"publishTime":1787488188284,"limit":10},
+                "comments":[
+                  {
+                    "commentId":"root-a","parentCommentId":"parent","commentUserName":"A","commentContent":"第一层",
+                    "subCommentCount":2,"descendantCount":3,
+                    "subCommentList":[
+                      {
+                        "commentId":"child-a1","parentCommentId":"root-a","commentUserName":"B","commentContent":"第二层一",
+                        "subCommentCount":1,"descendantCount":1,
+                        "subCommentList":[
+                          {"commentId":"grand-a1","parentCommentId":"child-a1","commentUserName":"C","commentContent":"第三层"}
+                        ]
+                      },
+                      {"commentId":"child-a2","parentCommentId":"root-a","commentUserName":"D","commentContent":"第二层二"}
+                    ]
+                  },
+                  {"commentId":"root-b","parentCommentId":"parent","commentUserName":"E","commentContent":"第一层二"}
+                ]
               }
             }
         """.trimIndent()
