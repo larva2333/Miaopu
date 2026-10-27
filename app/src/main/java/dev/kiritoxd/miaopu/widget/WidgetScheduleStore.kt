@@ -56,7 +56,11 @@ internal class WidgetScheduleStore(private val context: Context) {
     fun state(now: Long): WidgetScheduleState {
         val snapshots = EsportSubscriptionStore(context).subscriptions().map(::snapshot)
         return WidgetScheduleState(
-            matches = selectWidgetScheduleMatches(snapshots.flatMap { it.matches }, now),
+            matches = selectWidgetScheduleMatches(
+                snapshots.flatMap { it.matches },
+                now,
+                WidgetScheduleSizing.MAX_SECTION_ROWS,
+            ),
             updatedAt = snapshots.map { it.updatedAt }.filter { it > 0 }.minOrNull() ?: 0,
             failed = snapshots.any { it.failed },
             hasFetched = snapshots.any { it.attemptedAt > 0 },

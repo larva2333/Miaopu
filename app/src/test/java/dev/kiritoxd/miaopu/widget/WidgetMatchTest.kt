@@ -66,7 +66,12 @@ class WidgetMatchTest {
         val cached = selectWidgetScheduleMatches(input, now, 30)
         assertEquals(60, cached.size)
         assertEquals(30, cached.count(WidgetMatch::terminal))
-        assertEquals(6, selectWidgetScheduleMatches(cached, now).size)
+        val visible = selectWidgetScheduleMatches(
+            cached,
+            now,
+            WidgetScheduleSizing.MAX_SECTION_ROWS,
+        )
+        assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS * 2, visible.size)
     }
 
     @Test fun `does not guess live from a scheduled start time`() {

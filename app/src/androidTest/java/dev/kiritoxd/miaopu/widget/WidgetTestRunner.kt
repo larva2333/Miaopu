@@ -52,7 +52,17 @@ class WidgetTestRunner : Instrumentation() {
                     match.copy(id = "done-2", uniqueKey = "done-2", businessId = "cs2", status = "已结束", statusCode = "COMPLETED", startsAt = now - 7_200_000,
                         teams = listOf(WidgetTeam("FaZe", null, "0"), WidgetTeam("Liquid", null, "2"))),
                     match.copy(id = "done-3", uniqueKey = "done-3", businessId = "cs2", status = "已结束", statusCode = "COMPLETED", startsAt = now - 10_800_000,
-                        teams = listOf(WidgetTeam("Spirit", null, "2"), WidgetTeam("FURIA", null, "0"))))
+                        teams = listOf(WidgetTeam("Spirit", null, "2"), WidgetTeam("FURIA", null, "0"))),
+                    match.copy(id = "next-3", uniqueKey = "next-3", businessId = "lol", status = "未开始", statusCode = null, startsAt = now + 10_800_000,
+                        teams = listOf(WidgetTeam("BLG", null, null), WidgetTeam("TES", null, null))),
+                    match.copy(id = "next-4", uniqueKey = "next-4", businessId = "cs2", status = "未开始", statusCode = null, startsAt = now + 14_400_000,
+                        teams = listOf(WidgetTeam("MOUZ", null, null), WidgetTeam("G2", null, null))),
+                    match.copy(id = "next-5", uniqueKey = "next-5", businessId = "val", status = "未开始", statusCode = null, startsAt = now + 18_000_000,
+                        teams = listOf(WidgetTeam("TE", null, null), WidgetTeam("DRG", null, null))),
+                    match.copy(id = "done-4", uniqueKey = "done-4", businessId = "lol", status = "已结束", statusCode = "COMPLETED", startsAt = now - 14_400_000,
+                        teams = listOf(WidgetTeam("JDG", null, "2"), WidgetTeam("WBG", null, "1"))),
+                    match.copy(id = "done-5", uniqueKey = "done-5", businessId = "val", status = "已结束", statusCode = "COMPLETED", startsAt = now - 18_000_000,
+                        teams = listOf(WidgetTeam("SEN", null, "0"), WidgetTeam("FNC", null, "2"))))
                 verifyCache(match, now)
                 val states = mapOf(
                     "content" to WidgetScheduleState(matches, now, false, true),
@@ -107,7 +117,14 @@ class WidgetTestRunner : Instrumentation() {
                                 val status = view.findViewById<TextView>(R.id.widget_row_status)
                                 val sport = view.findViewById<TextView>(R.id.widget_row_sport)
                                 check(sport.left >= status.right) { "Sport must follow the time horizontally" }
-                                WidgetScheduleAssertions.verifyColumns(view, state, profile.startsWith("tablet"))
+                                val compact = heightDp < 155 || large
+                                val expectedRows = WidgetScheduleSizing.visibleRows(heightDp, compact, large)
+                                WidgetScheduleAssertions.verifyColumns(
+                                    view,
+                                    state,
+                                    profile.startsWith("tablet"),
+                                    expectedRows,
+                                )
                             }
                             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                             view.draw(Canvas(bitmap))
@@ -170,14 +187,14 @@ class WidgetTestRunner : Instrumentation() {
             val many = (1..65).map { index ->
                 match.copy(id = "next-$index", uniqueKey = "next-$index", status = "未开始", statusCode = null,
                     startsAt = now + index * 3_600_000L)
-            } + (1..4).map { index ->
+            } + (1..12).map { index ->
                 match.copy(id = "done-$index", uniqueKey = "done-$index", status = "已结束", statusCode = "COMPLETED",
                     startsAt = now - index * 3_600_000L)
             }
             store.record(Esport.LOL, Schedule(null, listOf(ScheduleDay("", "", many.map { it.toModel() }))), now + 2)
             check(store.snapshot(Esport.LOL).matches.size <= 60)
-            check(store.state(now).matches.count(WidgetMatch::terminal) == 3)
-            check(store.state(now).matches.count { !it.terminal } == 3)
+            check(store.state(now).matches.count(WidgetMatch::terminal) == WidgetScheduleSizing.MAX_SECTION_ROWS)
+            check(store.state(now).matches.count { !it.terminal } == WidgetScheduleSizing.MAX_SECTION_ROWS)
         } finally {
             prefs.forEach { context.getSharedPreferences(it, Context.MODE_PRIVATE).edit().clear().commit() }
         }

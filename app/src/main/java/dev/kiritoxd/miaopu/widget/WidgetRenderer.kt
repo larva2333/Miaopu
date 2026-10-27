@@ -50,6 +50,25 @@ internal object WidgetRenderer {
         }
     }
 
+    fun matchesForLogos(context: Context, state: WidgetScheduleState): List<WidgetMatch> {
+        val manager = AppWidgetManager.getInstance(context)
+        val largeFont = context.resources.configuration.fontScale > 1.3f
+        return ids(context).flatMap { (id, wide) ->
+            responsiveWidgetSizes(manager.getAppWidgetOptions(id), wide).flatMap { (width, height) ->
+                if (!wide) return@flatMap state.matches.take(1)
+                val contentHeight = height
+                val compact = contentHeight < 155 || largeFont
+                val rowCount = WidgetScheduleSizing.visibleRows(contentHeight, compact, largeFont)
+                if (WidgetScheduleLayout.hasTwoColumns(context, width, compact)) {
+                    state.matches.filterNot(WidgetMatch::terminal).take(rowCount) +
+                        state.matches.filter(WidgetMatch::terminal).take(rowCount)
+                } else {
+                    state.matches.take(rowCount)
+                }
+            }
+        }.distinctBy(WidgetMatch::identity)
+    }
+
     internal fun create(
         context: Context, id: Int, wide: Boolean, state: WidgetScheduleState, now: Long,
         height: Int = 180, largeFont: Boolean = false, refreshStatus: WidgetRefreshStatus = WidgetRefreshStatus.IDLE,
@@ -105,7 +124,7 @@ internal object WidgetRenderer {
             views.setViewVisibility(R.id.widget_date, if (largeFont) View.GONE else View.VISIBLE)
             views.setViewVisibility(R.id.widget_rows, if (empty) View.GONE else View.VISIBLE)
             views.removeAllViews(R.id.widget_rows)
-            val rowCount = if (contentHeight < 130 || largeFont && contentHeight < 175) 1 else if (compact) 2 else 3
+            val rowCount = WidgetScheduleSizing.visibleRows(contentHeight, compact, largeFont)
             if (!empty && WidgetScheduleLayout.hasTwoColumns(context, width, compact)) {
                 val columns = RemoteViews(context.packageName, R.layout.widget_schedule_columns)
                 fun bindColumn(rowsId: Int, emptyId: Int, matches: List<WidgetMatch>) {
@@ -166,8 +185,12 @@ internal object WidgetRenderer {
         views.setInt(R.id.widget_row_status, "setMaxLines", 1)
         views.setViewVisibility(R.id.widget_row_sport, View.VISIBLE)
         views.setTextViewText(R.id.widget_row_sport, match.sportLabel)
-        views.setTextViewText(R.id.widget_row_score, match.scoreLabel())
-        if (match.scoreLabel().length > 6) views.setTextViewTextSize(R.id.widget_row_score, TypedValue.COMPLEX_UNIT_SP, 12f)
+        val scoreLabel = match.scoreLabel()
+        views.setTextViewText(R.id.widget_row_score, scoreLabel)
+        // "VS" is a placeholder, not real data — render it smaller so it never competes with team names.
+        if (scoreLabel == "VS") {
+            views.setTextViewTextSize(R.id.widget_row_score, TypedValue.COMPLEX_UNIT_SP, 11f)
+        }
         bindTeams(context, views, match, true)
         views.setContentDescription(R.id.widget_row, description(match, now))
         views.setOnClickPendingIntent(R.id.widget_row, WidgetIntents.open(context, id, match))

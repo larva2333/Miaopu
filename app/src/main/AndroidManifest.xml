@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
+    <uses-permission android:name="com.miui.home.launcher.permission.INSTALL_WIDGET" />
+
+    <queries>
+        <package android:name="com.miui.home" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -22,14 +28,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <receiver android:name=".widget.MatchWidgetProvider" android:exported="false"
+        <receiver android:name=".widget.MatchWidgetProvider" android:exported="true"
             android:label="@string/widget_match_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_match_info" />
         </receiver>
-        <receiver android:name=".widget.ScheduleWidgetProvider" android:exported="false"
+        <receiver android:name=".widget.ScheduleWidgetProvider" android:exported="true"
             android:label="@string/widget_schedule_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

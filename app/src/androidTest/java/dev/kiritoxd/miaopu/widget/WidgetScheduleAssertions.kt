@@ -42,14 +42,19 @@ internal object WidgetScheduleAssertions {
         check(WidgetScheduleLayout.hasTwoColumns(large, 1200, true))
     }
 
-    fun verifyColumns(view: View, state: WidgetScheduleState, expectColumns: Boolean) {
+    fun verifyColumns(
+        view: View,
+        state: WidgetScheduleState,
+        expectColumns: Boolean,
+        expectedRows: Int,
+    ) {
         val history = view.findViewById<ViewGroup>(R.id.widget_history_rows)
         val recent = view.findViewById<ViewGroup>(R.id.widget_recent_rows)
         check((history != null && recent != null) == expectColumns) { "Unexpected column count" }
         if (!expectColumns) return
         check(history != null && recent != null)
-        verifySection(history, state.matches.filter(WidgetMatch::terminal))
-        verifySection(recent, state.matches.filterNot(WidgetMatch::terminal))
+        verifySection(history, state.matches.filter(WidgetMatch::terminal), expectedRows)
+        verifySection(recent, state.matches.filterNot(WidgetMatch::terminal), expectedRows)
         check(view.findViewById<View>(R.id.widget_history_empty).visibility ==
             if (state.matches.none(WidgetMatch::terminal)) View.VISIBLE else View.GONE)
         check(view.findViewById<View>(R.id.widget_recent_empty).visibility ==
@@ -63,9 +68,12 @@ internal object WidgetScheduleAssertions {
         }
     }
 
-    private fun verifySection(rows: ViewGroup, matches: List<WidgetMatch>) {
+    private fun verifySection(rows: ViewGroup, matches: List<WidgetMatch>, expectedRows: Int) {
         val visible = (0 until rows.childCount).map(rows::getChildAt).filter { it.visibility == View.VISIBLE }
-        check(visible.size == minOf(matches.size, rows.childCount))
+        check(rows.childCount == if (matches.isEmpty()) 0 else expectedRows) {
+            "Unexpected rendered row count"
+        }
+        check(visible.size == minOf(matches.size, expectedRows))
         visible.forEachIndexed { index, row ->
             check(row.findViewById<TextView>(R.id.widget_row_team_0).text.toString() == matches[index].teams[0].name)
             check(row.findViewById<TextView>(R.id.widget_row_score).text.toString() == matches[index].scoreLabel())

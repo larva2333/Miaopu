@@ -70,7 +70,9 @@ class WidgetRefreshService : JobService() {
                 }
                 WidgetRenderer.renderAll(this@WidgetRefreshService)
                 try {
-                    if (WidgetLogoStore(this@WidgetRefreshService).load(store.state(System.currentTimeMillis()).matches)) {
+                    val state = store.state(System.currentTimeMillis())
+                    val matches = WidgetRenderer.matchesForLogos(this@WidgetRefreshService, state)
+                    if (WidgetLogoStore(this@WidgetRefreshService).load(matches)) {
                         WidgetRenderer.renderAll(this@WidgetRefreshService)
                     }
                 } catch (_: IOException) {

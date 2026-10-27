@@ -19,7 +19,8 @@ internal object WidgetUpdates {
         val worker = queue ?: WidgetRenderQueue(scope) {
             try {
                 WidgetRenderer.renderAll(app)
-                val matches = WidgetScheduleStore(app).state(System.currentTimeMillis()).matches
+                val state = WidgetScheduleStore(app).state(System.currentTimeMillis())
+                val matches = WidgetRenderer.matchesForLogos(app, state)
                 if (WidgetLogoStore(app).load(matches)) WidgetRenderer.renderAll(app)
             } catch (cancelled: CancellationException) {
                 throw cancelled
