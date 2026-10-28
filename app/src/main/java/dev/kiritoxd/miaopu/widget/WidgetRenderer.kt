@@ -178,7 +178,7 @@ internal object WidgetRenderer {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_row)
         val upcoming = !match.live && !match.terminal
         views.setTextViewText(R.id.widget_row_status, when {
-            match.live -> if (largeFont) match.status else "● ${match.status}"
+            match.live -> match.status
             match.terminal -> match.status
             else -> match.widgetTime(now, context)
         })
