@@ -33,6 +33,12 @@ open class BaseScheduleWidgetProvider : AppWidgetProvider() {
         render(context)
     }
 
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        // Drop each removed instance's pinned match so a later id reuse starts from the default.
+        val store = MatchWidgetConfigStore(context)
+        appWidgetIds.forEach(store::remove)
+    }
+
     override fun onDisabled(context: Context) {
         if (WidgetRenderer.ids(context).isEmpty()) {
             context.getSystemService(JobScheduler::class.java).cancel(WidgetRefreshService.JOB_ID)

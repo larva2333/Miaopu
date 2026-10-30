@@ -24,6 +24,7 @@ class MatchAlertReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 MatchAlerts.reschedule(app, force = true)
+                if (MatchAlerts.isEnabled(app)) MatchAlertFallbackService.enqueue(app)
                 return
             }
             MatchAlerts.ACTION_MATCH_ALERT -> Unit

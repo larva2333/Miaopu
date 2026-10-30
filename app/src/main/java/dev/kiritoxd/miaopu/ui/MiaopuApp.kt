@@ -19,7 +19,9 @@ import top.yukonga.miuix.kmp.theme.ThemeController
 
 @Composable
 fun MiaopuApp(viewModel: MiaopuViewModel) {
-    val backStack = rememberNavBackStack<AppScreen>(AppScreen.Schedule)
+    // A launch from a widget or notification pre-seeds the match detail on top, so it renders
+    // immediately instead of animating over a freshly composed schedule list.
+    val backStack = rememberNavBackStack(*viewModel.initialBackStack().toTypedArray())
     val navigator = remember(backStack) { MiaopuNavigator(backStack) }
     DisposableEffect(viewModel, navigator) {
         viewModel.attachNavigator(navigator)

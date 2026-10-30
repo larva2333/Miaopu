@@ -1,8 +1,10 @@
 package dev.kiritoxd.miaopu.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +69,7 @@ import dev.kiritoxd.miaopu.data.focusInitialItemIndex
 import dev.kiritoxd.miaopu.data.homeWindowAround
 import dev.kiritoxd.miaopu.data.liveOrUpcomingFocus
 import dev.kiritoxd.miaopu.data.mergeSchedules
+import dev.kiritoxd.miaopu.notify.MatchAlerts
 import dev.kiritoxd.miaopu.widget.PinnableWidget
 import dev.kiritoxd.miaopu.widget.WidgetPinner
 import kotlinx.coroutines.Dispatchers
@@ -888,6 +891,22 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                             style = MiuixTheme.textStyles.footnote1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
+                        if (viewModel.matchAlertsEnabled && MatchAlerts.isPostBlocked(context)) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "系统把喵扑的通知关了，点这里去打开，否则提醒发不出来",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        },
+                                    )
+                                },
+                            )
+                        }
                     }
                     Spacer(Modifier.width(12.dp))
                     Switch(
@@ -910,7 +929,7 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                 Text("添加到桌面", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "点一下直接加到桌面，不弹确认框；之后长按可拖到想要的位置。",
+                    "点一下直接加到桌面，可以重复添加多个；长按桌面上的单场小部件可重选场次。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

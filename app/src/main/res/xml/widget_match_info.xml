@@ -10,6 +10,8 @@
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
     android:widgetCategory="home_screen"
+    android:configure="dev.kiritoxd.miaopu.widget.MatchWidgetConfigureActivity"
+    android:widgetFeatures="reconfigurable"
     android:initialLayout="@layout/widget_match"
     android:previewLayout="@layout/widget_match_preview"
     android:description="@string/widget_match_description"/>

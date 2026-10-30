@@ -346,11 +346,7 @@ class MiaopuViewModel(
         val app = getApplication<Application>()
         widgetPinJob = viewModelScope.launch {
             val before = WidgetPinner.instanceCount(app, widget)
-            if (before > 0) {
-                // 桌面已经有同款，再发一次会被 launcher 落回同一格、覆盖原来的位置，直接引导手动添加。
-                message = "桌面上已有 $before 个，长按桌面空白处 → 添加小工具 → 喵扑 可再添加一个"
-                return@launch
-            }
+            // 允许多次添加：桌面已有同款也继续请求，每次都是独立实例、各自选自己的场次。
             val requested = WidgetPinner.request(app, widget)
             // 小米桌面是静默添加（没有任何确认弹窗），launcher 落位是异步的，
             // 所以等一小会儿再核对实例数量，避免把"已加成功"误报成失败。
@@ -358,6 +354,7 @@ class MiaopuViewModel(
             val after = WidgetPinner.instanceCount(app, widget)
             message = when {
                 after > before -> "已添加到桌面，回到桌面即可看到；长按可调整位置"
+                before > 0 -> "这次没加上：部分桌面会把同款合并到已有位置。可长按桌面空白处 → 添加小工具 → 喵扑 再添一个"
                 else -> "系统拦下了添加：请点上方「开启桌面快捷方式权限」允许后再试"
             }
         }
@@ -459,10 +456,27 @@ class MiaopuViewModel(
             return
         }
         pendingWidgetDestination = null
-        while (currentNavigator.backStack.size > 1) goBack()
+        // Cold start from a widget or notification seeds [Schedule, Ratings] directly, so the
+        // detail page is already on top; popping to the list first would flash it and re-run
+        // the slide animation over a freshly composed list.
+        val target = match?.toRoute()
+        val alreadyOnTop = target != null && currentNavigator.currentScreen == AppScreen.Ratings(target)
+        if (!alreadyOnTop) {
+            while (currentNavigator.backStack.size > 1) goBack()
+        }
         sport?.let(::selectEsport)
         selectMainSection(MainSection.EVENTS)
         if (match != null) openMatch(match)
+    }
+
+    /**
+     * Screens the back stack should start with. When the launch intent came from a widget or a
+     * kickoff notification, the match detail is pre-seeded on top of the list so it shows
+     * immediately without a push animation over the schedule page.
+     */
+    internal fun initialBackStack(): List<AppScreen> {
+        val match = pendingWidgetDestination?.first ?: return listOf(AppScreen.Schedule)
+        return listOf(AppScreen.Schedule, AppScreen.Ratings(match.toRoute()))
     }
 
     fun openStage(match: MatchSummary, stage: RatingStage, stageNumber: Int) {

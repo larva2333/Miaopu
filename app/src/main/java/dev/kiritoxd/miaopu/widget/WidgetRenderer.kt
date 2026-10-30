@@ -40,22 +40,54 @@ internal object WidgetRenderer {
             val refreshStatus = WidgetRefreshService.status(context)
             val manager = AppWidgetManager.getInstance(context)
             ids(context).forEach { (id, wide) ->
-                val options = manager.getAppWidgetOptions(id)
-                val largeFont = context.resources.configuration.fontScale > 1.3f
-                val views = responsiveWidgetViews(options, wide) { width, height ->
-                    create(context, id, wide, state, now, height, largeFont, refreshStatus, width)
-                }
-                manager.updateAppWidget(id, views)
+                renderOne(context, manager, id, wide, state, now, refreshStatus)
             }
         }
+    }
+
+    /**
+     * Re-render a single widget after its match selection changed. Uses the same sizing rules as
+     * [renderAll] so a reconfigured widget keeps its real host size instead of the default box.
+     */
+    suspend fun renderOne(context: Context, appWidgetId: Int) = withContext(Dispatchers.IO) {
+        renderMutex.withLock {
+            val manager = AppWidgetManager.getInstance(context)
+            val wide = manager.getAppWidgetIds(ComponentName(context, ScheduleWidgetProvider::class.java))
+                .contains(appWidgetId)
+            val now = System.currentTimeMillis()
+            val state = WidgetScheduleStore(context).state(now)
+            renderOne(context, manager, appWidgetId, wide, state, now, WidgetRefreshService.status(context))
+        }
+    }
+
+    private fun renderOne(
+        context: Context,
+        manager: AppWidgetManager,
+        id: Int,
+        wide: Boolean,
+        state: WidgetScheduleState,
+        now: Long,
+        refreshStatus: WidgetRefreshStatus,
+    ) {
+        val options = manager.getAppWidgetOptions(id)
+        val largeFont = context.resources.configuration.fontScale > 1.3f
+        val pinned = if (wide) null else resolvePinnedMatch(context, id, state.matches, now)
+        val views = responsiveWidgetViews(options, wide) { width, height ->
+            create(context, id, wide, state, now, height, largeFont, refreshStatus, width, pinned)
+        }
+        manager.updateAppWidget(id, views)
     }
 
     fun matchesForLogos(context: Context, state: WidgetScheduleState): List<WidgetMatch> {
         val manager = AppWidgetManager.getInstance(context)
         val largeFont = context.resources.configuration.fontScale > 1.3f
+        val now = System.currentTimeMillis()
         return ids(context).flatMap { (id, wide) ->
+            // The single-match widget may be pinned to a match other than the first candidate.
+            val single = if (wide) null else
+                resolvePinnedMatch(context, id, state.matches, now) ?: state.matches.firstOrNull()
             responsiveWidgetSizes(manager.getAppWidgetOptions(id), wide).flatMap { (width, height) ->
-                if (!wide) return@flatMap state.matches.take(1)
+                if (!wide) return@flatMap listOfNotNull(single)
                 val contentHeight = height
                 val compact = contentHeight < 155 || largeFont
                 val rowCount = WidgetScheduleSizing.visibleRows(contentHeight, compact, largeFont)
@@ -73,6 +105,7 @@ internal object WidgetRenderer {
         context: Context, id: Int, wide: Boolean, state: WidgetScheduleState, now: Long,
         height: Int = 180, largeFont: Boolean = false, refreshStatus: WidgetRefreshStatus = WidgetRefreshStatus.IDLE,
         width: Int = if (wide) 340 else 170,
+        pinned: WidgetMatch? = null,
     ): RemoteViews {
         val contentHeight = if (wide) height else minOf(width, height)
         val compact = contentHeight < 155 || largeFont
@@ -83,6 +116,9 @@ internal object WidgetRenderer {
             else -> R.layout.widget_match
         }
         val views = RemoteViews(context.packageName, layout)
+        // A single-match widget shows the pinned match when it has one, otherwise the first one.
+        val single = if (wide) null else pinned ?: state.matches.firstOrNull()
+        val empty = if (wide) state.matches.isEmpty() else single == null
         if (!wide) {
             val density = context.resources.displayMetrics.density
             val horizontal = ((width - contentHeight) * density).roundToInt().coerceAtLeast(0)
@@ -105,10 +141,9 @@ internal object WidgetRenderer {
             ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         val stale = state.failed || !online || state.updatedAt > 0 && now - state.updatedAt >= 30 * 60_000L
         val footer = widgetFooterText(refreshStatus, state.failed, online, stale, updated,
-            sportLabel = if (wide) null else state.matches.firstOrNull()?.sportLabel)
+            sportLabel = if (wide) null else single?.sportLabel)
         views.setTextViewText(R.id.widget_footer, footer)
         views.setContentDescription(R.id.widget_footer, if (stale) "$footer，显示上次获取的赛程，更新时间 $updated" else footer)
-        val empty = state.matches.isEmpty()
         views.setViewVisibility(R.id.widget_empty, if (empty) View.VISIBLE else View.GONE)
         views.setTextViewText(R.id.widget_empty, when {
             !online && !state.hasFetched -> if (contentHeight < 135) "等待联网" else "等待网络连接"
@@ -145,7 +180,16 @@ internal object WidgetRenderer {
                 bindColumn(R.id.widget_recent_rows, R.id.widget_recent_empty, state.matches.filterNot(WidgetMatch::terminal))
                 views.addView(R.id.widget_rows, columns)
             } else {
-                state.matches.take(rowCount).forEach { match ->
+                // Pin the two most recent finished matches on top (chronological order), then
+                // live/upcoming. Once everything has finished, fill the panel with all results,
+                // oldest first, so time always runs top to bottom.
+                val upcoming = state.matches.filterNot(WidgetMatch::terminal)
+                val rows = if (upcoming.isEmpty()) {
+                    state.matches.filter(WidgetMatch::terminal).sortedBy(WidgetMatch::startsAt)
+                } else {
+                    recentFinished(state.matches) + upcoming
+                }
+                rows.take(rowCount).forEach { match ->
                     views.addView(R.id.widget_rows, row(context, id, match, now, largeFont))
                 }
             }
@@ -157,7 +201,7 @@ internal object WidgetRenderer {
             views.setViewVisibility(R.id.widget_match_content, if (empty) View.GONE else View.VISIBLE)
             views.setViewVisibility(R.id.widget_status, if (empty) View.INVISIBLE else View.VISIBLE)
             views.setViewVisibility(R.id.widget_competition, if (empty || contentHeight < 155 || largeFont) View.GONE else View.VISIBLE)
-            state.matches.firstOrNull()?.let { match ->
+            single?.let { match ->
                 views.setTextViewText(R.id.widget_status, if (match.live) "● ${match.status}" else if (match.terminal) match.status else "${SimpleDateFormat("MM-dd HH:mm", Locale.ROOT).format(Date(match.startsAt))}")
                 views.textColor(context, R.id.widget_status, if (match.live) R.color.widget_accent else R.color.widget_secondary)
                 views.setTextViewText(R.id.widget_competition, match.competition.ifBlank { match.name })
@@ -174,6 +218,13 @@ internal object WidgetRenderer {
         return views
     }
 
+    /** The two most recently finished matches, oldest first, so the panel reads chronologically. */
+    private fun recentFinished(matches: List<WidgetMatch>): List<WidgetMatch> =
+        matches.filter(WidgetMatch::terminal)
+            .sortedByDescending(WidgetMatch::startsAt)
+            .take(2)
+            .asReversed()
+
     private fun row(context: Context, id: Int, match: WidgetMatch, now: Long, largeFont: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_row)
         val upcoming = !match.live && !match.terminal
@@ -184,7 +235,13 @@ internal object WidgetRenderer {
         })
         // Upcoming rows carry a second, smaller day line ("今天"/date) under the clock.
         views.setInt(R.id.widget_row_status, "setMaxLines", if (upcoming) 2 else 1)
-        views.textColor(context, R.id.widget_row_status, if (match.live) R.color.widget_accent else R.color.widget_text)
+        // Finished matches read as muted, live matches as accent, upcoming ones as normal text.
+        val statusColor = when {
+            match.live -> R.color.widget_accent
+            match.terminal -> R.color.widget_secondary
+            else -> R.color.widget_text
+        }
+        views.textColor(context, R.id.widget_row_status, statusColor)
         views.setViewVisibility(R.id.widget_row_sport, View.VISIBLE)
         views.setTextViewText(R.id.widget_row_sport, match.sportLabel)
         val scoreLabel = match.scoreLabel()

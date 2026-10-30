@@ -67,6 +67,12 @@ internal class WidgetScheduleStore(private val context: Context) {
         )
     }
 
+    /** Every selectable candidate before the widget size trims the list, used by the picker. */
+    fun candidates(now: Long): List<WidgetMatch> {
+        val snapshots = EsportSubscriptionStore(context).subscriptions().map(::snapshot)
+        return selectWidgetScheduleMatches(snapshots.flatMap { it.matches }, now, Int.MAX_VALUE)
+    }
+
     fun find(businessId: String?, matchId: String?): WidgetMatch? =
         EsportSubscriptionStore(context).subscriptions().firstOrNull { it.businessId == businessId }
             ?.let(::snapshot)?.matches?.firstOrNull { it.id == matchId }

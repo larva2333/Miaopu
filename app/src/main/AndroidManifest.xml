@@ -31,6 +31,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".widget.MatchWidgetConfigureActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Miaopu" />
         <receiver android:name=".widget.MatchWidgetProvider" android:exported="true"
             android:label="@string/widget_match_name">
             <intent-filter>
@@ -46,6 +50,8 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_schedule_info" />
         </receiver>
         <service android:name=".widget.WidgetRefreshService" android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service android:name=".notify.MatchAlertFallbackService" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <receiver android:name=".notify.MatchAlertReceiver" android:exported="false">
             <intent-filter>

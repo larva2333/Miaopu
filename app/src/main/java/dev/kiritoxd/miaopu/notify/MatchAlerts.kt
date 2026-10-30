@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import dev.kiritoxd.miaopu.data.EsportCatalog
 import dev.kiritoxd.miaopu.data.EsportSubscriptionStore
 import dev.kiritoxd.miaopu.widget.WidgetMatch
 import dev.kiritoxd.miaopu.widget.WidgetScheduleStore
@@ -31,7 +32,12 @@ internal object MatchAlerts {
     fun setEnabled(context: Context, enabled: Boolean) {
         val app = context.applicationContext
         MatchAlertSettings(app).enabled = enabled
-        if (enabled) ensureChannel(app)
+        if (enabled) {
+            ensureChannel(app)
+            MatchAlertFallbackService.enqueue(app)
+        } else {
+            MatchAlertFallbackService.cancel(app)
+        }
         reschedule(app, force = true)
     }
 
@@ -74,6 +80,44 @@ internal object MatchAlerts {
                 description = "订阅的赛事开始时提醒"
             },
         )
+    }
+
+    /** True when the switch is on but the system will swallow every notification: the app-wide
+     *  permission was revoked or the match_start channel was muted in system settings. */
+    fun isPostBlocked(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.areNotificationsEnabled()) return true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return false
+            if (channel.importance == NotificationManager.IMPORTANCE_NONE) return true
+        }
+        return false
+    }
+
+    /** Posts reminders for subscribed matches that kicked off within the grace window but were
+     *  never announced — the fallback for kickoff alarms lost to battery savers or reboots. */
+    fun postMissedStarts(context: Context, graceMs: Long = FALLBACK_GRACE_MS) {
+        val app = context.applicationContext
+        val settings = MatchAlertSettings(app)
+        if (!settings.enabled) return
+        val now = System.currentTimeMillis()
+        val store = WidgetScheduleStore(app)
+        val missed = EsportSubscriptionStore(app).subscriptions()
+            .flatMap { esport -> store.snapshot(esport).matches }
+            .filter { EsportCatalog.byBusinessId(it.businessId) != null }
+            .distinctBy(WidgetMatch::identity)
+            .filter { !it.terminal && it.startsAt in (now - graceMs)..now && it.identity !in settings.notified() }
+        missed.forEach { match ->
+            MatchAlertReceiver.show(
+                context = app,
+                identity = match.identity,
+                title = match.alertTitle(),
+                body = match.alertBody(),
+                businessId = match.businessId,
+                matchId = match.id,
+            )
+            settings.rememberNotified(match.identity)
+        }
     }
 
     private fun cancelAll(context: Context, settings: MatchAlertSettings, alarmManager: AlarmManager?) {
@@ -149,6 +193,10 @@ internal fun upcomingAlertMatches(
 
 private const val ALERT_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
 private const val MAX_ALARMS = 12
+
+/** How long after kickoff the fallback sweep still announces a match (an hour-old start is
+ *  worth one late reminder; a yesterday one is not). */
+internal const val FALLBACK_GRACE_MS = 60L * 60 * 1000
 
 /** "英雄联盟 · LPL · 20:00 开赛" */
 internal fun WidgetMatch.alertBody(): String {
