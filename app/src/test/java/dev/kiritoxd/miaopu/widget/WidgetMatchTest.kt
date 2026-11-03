@@ -74,6 +74,54 @@ class WidgetMatchTest {
         assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS * 2, visible.size)
     }
 
+    @Test fun `card keeps two results and never exceeds eight rows`() {
+        val upcoming = (1..8).map { match("next-$it", "未开始", now + it * hour) }
+        val history = (1..5).map { match("done-$it", "已结束", now - it * hour) }
+        val card = widgetCardMatches((upcoming + history).reversed(), now)
+        assertEquals(8, card.size)
+        assertEquals(2, card.count(WidgetMatch::terminal))
+        assertEquals(
+            (1..6).map { "next-$it" } + listOf("done-1", "done-2"),
+            card.map { it.id },
+        )
+    }
+
+    @Test fun `card spends the leftover rows on results when few fixtures remain`() {
+        val card = widgetCardMatches(
+            listOf(match("next-1", "未开始", now + hour)) +
+                (1..5).map { match("done-$it", "已结束", now - it * hour) },
+            now,
+        )
+        assertEquals(listOf("next-1", "done-1", "done-2"), card.map { it.id })
+        assertTrue(widgetCardMatches(emptyList(), now).isEmpty())
+    }
+
+    @Test fun `card fills with results when nothing is left to play`() {
+        val card = widgetCardMatches((1..10).map { match("done-$it", "已结束", now - it * hour) }, now)
+        assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS, card.size)
+        assertTrue(card.all(WidgetMatch::terminal))
+        assertEquals("done-1", card.first().id)
+    }
+
+    @Test fun `live match counts against the fixture rows rather than the results`() {
+        val card = widgetCardMatches(
+            listOf(match("live", "进行中", now - hour)) +
+                (1..3).map { match("done-$it", "已结束", now - it * hour) },
+            now,
+        )
+        assertEquals(listOf("live", "done-1", "done-2"), card.map { it.id })
+    }
+
+    @Test fun `card still reports a result from beyond the fixture window`() {
+        val old = match("done-old", "已结束", now - 72 * hour)
+        val card = widgetCardMatches(listOf(match("next-1", "未开始", now + hour), old), now)
+        assertEquals(listOf("next-1", "done-old"), card.map { it.id })
+        // The candidate list keeps its narrow window; only the card reaches back for results.
+        assertTrue(selectWidgetMatches(listOf(old), now).isEmpty())
+        // Anything past a week is still dropped rather than shown as today's news.
+        assertTrue(widgetCardMatches(listOf(match("stale", "已结束", now - 8 * 24 * hour)), now).isEmpty())
+    }
+
     @Test fun `does not guess live from a scheduled start time`() {
         assertTrue(selectWidgetMatches(listOf(match("past", "未开始", now - hour)), now).isEmpty())
     }

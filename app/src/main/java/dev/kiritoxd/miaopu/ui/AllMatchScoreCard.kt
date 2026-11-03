@@ -1,13 +1,20 @@
 package dev.kiritoxd.miaopu.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -20,15 +27,15 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun AllMatchScoreCard(scores: MatchAllScores) {
+internal fun AllMatchScoreCard(scores: MatchAllScores, onTeamClick: ((String) -> Unit)? = null) {
     if (!scores.hasScores) return
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), cornerRadius = 18.dp,
         insideMargin = PaddingValues(12.dp)) {
         Text("全场评分", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         scores.teams.chunked(2).forEach { pair ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                ScoreTeamHeading(pair.first(), false)
-                pair.getOrNull(1)?.let { ScoreTeamHeading(it, true) }
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                ScoreTeamHeading(pair.first(), false, onTeamClick)
+                pair.getOrNull(1)?.let { ScoreTeamHeading(it, true, onTeamClick) }
             }
             repeat(pair.maxOf { it.players.size }) { index ->
                 if (index > 0) Box(Modifier.fillMaxWidth().height(0.5.dp)
@@ -45,8 +52,29 @@ internal fun AllMatchScoreCard(scores: MatchAllScores) {
 }
 
 @Composable
-private fun ScoreTeamHeading(team: ScoredTeam, right: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ScoreTeamHeading(team: ScoredTeam, right: Boolean, onTeamClick: ((String) -> Unit)? = null) {
+    // The crest here is the second place a team appears on this page, so it opens the same
+    // record sheet as the hero crest. Teams are matched by name: this payload carries no id.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .then(
+                if (onTeamClick != null) {
+                    Modifier
+                        .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                            onTeamClick(team.name)
+                        }
+                        .background(if (pressed) MiuixTheme.colorScheme.surfaceVariant else Color.Transparent)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (!right && team.logoUrl != null) LogoImage(team.logoUrl, Modifier.size(22.dp))
         Text(team.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         if (right && team.logoUrl != null) LogoImage(team.logoUrl, Modifier.size(22.dp))

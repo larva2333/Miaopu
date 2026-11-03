@@ -2,7 +2,15 @@ package dev.kiritoxd.miaopu.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.withStyle
@@ -22,7 +30,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun MatchHero(match: MatchSummary, liveScore: MatchLiveScore? = null) {
+internal fun MatchHero(match: MatchSummary, liveScore: MatchLiveScore? = null, onTeamClick: ((Team) -> Unit)? = null) {
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         cornerRadius = 20.dp, insideMargin = PaddingValues(horizontal = 16.dp, vertical = 16.dp)) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -33,7 +41,7 @@ internal fun MatchHero(match: MatchSummary, liveScore: MatchLiveScore? = null) {
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 2,
                 overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             if (match.teams.size == 2) Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                HeroTeam(match.teams.getOrNull(0), Modifier.weight(1f))
+                HeroTeam(match.teams.getOrNull(0), Modifier.weight(1f), onTeamClick)
                 Column(Modifier.weight(1.2f), horizontalAlignment = Alignment.CenterHorizontally) {
                     liveScore?.currentMap?.let {
                         Text(it, modifier = Modifier.background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.08f), RoundedCornerShape(5.dp))
@@ -50,7 +58,7 @@ internal fun MatchHero(match: MatchSummary, liveScore: MatchLiveScore? = null) {
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
                 }
-                HeroTeam(match.teams.getOrNull(1), Modifier.weight(1f))
+                HeroTeam(match.teams.getOrNull(1), Modifier.weight(1f), onTeamClick)
             } else {
                 Text(match.teams.joinToString(" · ") { it.name }.ifBlank { match.esport.title },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), fontSize = 20.sp,
@@ -61,8 +69,30 @@ internal fun MatchHero(match: MatchSummary, liveScore: MatchLiveScore? = null) {
 }
 
 @Composable
-private fun HeroTeam(team: Team?, modifier: Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun HeroTeam(team: Team?, modifier: Modifier, onTeamClick: ((Team) -> Unit)? = null) {
+    // Crest and name share one tap target: a 44dp circle alone is easy to miss on a phone, and
+    // the pressed tint is the only feedback the card can show before the sheet slides in.
+    val target = team?.takeIf { it.id.isNotBlank() && onTeamClick != null }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .then(
+                if (target != null) {
+                    Modifier
+                        .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                            onTeamClick?.invoke(target)
+                        }
+                        .background(if (pressed) MiuixTheme.colorScheme.surfaceVariant else Color.Transparent)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         if (team != null) TeamLogo(team, 44.dp)
         Text(team?.name ?: "待定", fontSize = 14.sp, fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)

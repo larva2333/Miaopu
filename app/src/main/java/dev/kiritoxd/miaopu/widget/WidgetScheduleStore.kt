@@ -45,7 +45,14 @@ internal class WidgetScheduleStore(private val context: Context) {
             old.copy(attemptedAt = startedAt, failed = true)
         } else {
             WidgetScheduleSnapshot(
-                matches = selectWidgetScheduleMatches(schedule.days.flatMap { it.matches }.map { it.toWidgetMatch() }, startedAt, 30),
+                // Results are cached with the same lookback the card renders with, otherwise a
+                // finished match would be dropped on write and never reach the widget.
+                matches = selectWidgetScheduleMatches(
+                    schedule.days.flatMap { it.matches }.map { it.toWidgetMatch() },
+                    startedAt,
+                    30,
+                    WIDGET_RESULT_WINDOW_HOURS,
+                ),
                 updatedAt = System.currentTimeMillis(),
                 attemptedAt = startedAt,
             )
@@ -56,11 +63,9 @@ internal class WidgetScheduleStore(private val context: Context) {
     fun state(now: Long): WidgetScheduleState {
         val snapshots = EsportSubscriptionStore(context).subscriptions().map(::snapshot)
         return WidgetScheduleState(
-            matches = selectWidgetScheduleMatches(
-                snapshots.flatMap { it.matches },
-                now,
-                WidgetScheduleSizing.MAX_SECTION_ROWS,
-            ),
+            // The card budget, not the whole pool: at most two results plus the fixtures that fit.
+            // The picker still offers every candidate through [candidates].
+            matches = widgetCardMatches(snapshots.flatMap { it.matches }, now),
             updatedAt = snapshots.map { it.updatedAt }.filter { it > 0 }.minOrNull() ?: 0,
             failed = snapshots.any { it.failed },
             hasFetched = snapshots.any { it.attemptedAt > 0 },
@@ -70,7 +75,12 @@ internal class WidgetScheduleStore(private val context: Context) {
     /** Every selectable candidate before the widget size trims the list, used by the picker. */
     fun candidates(now: Long): List<WidgetMatch> {
         val snapshots = EsportSubscriptionStore(context).subscriptions().map(::snapshot)
-        return selectWidgetScheduleMatches(snapshots.flatMap { it.matches }, now, Int.MAX_VALUE)
+        return selectWidgetScheduleMatches(
+            snapshots.flatMap { it.matches },
+            now,
+            Int.MAX_VALUE,
+            WIDGET_RESULT_WINDOW_HOURS,
+        )
     }
 
     fun find(businessId: String?, matchId: String?): WidgetMatch? =

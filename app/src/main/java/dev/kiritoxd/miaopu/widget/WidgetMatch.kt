@@ -60,11 +60,16 @@ internal fun MatchSummary.toWidgetMatch() = WidgetMatch(
 )
 
 /** Live first, then upcoming, then recent results. Old seasons never fill an empty card. */
-internal fun selectWidgetMatches(matches: List<WidgetMatch>, now: Long, limit: Int = 3): List<WidgetMatch> {
+internal fun selectWidgetMatches(
+    matches: List<WidgetMatch>, now: Long, limit: Int = 3, historyHoursBack: Long = 48,
+): List<WidgetMatch> {
     val hour = 60 * 60 * 1000L
     val candidates = matches.filter {
         EsportCatalog.byBusinessId(it.businessId) != null &&
-            it.startsAt in (now - 48 * hour)..(now + 7 * 24 * hour) &&
+            it.startsAt <= now + 7 * 24 * hour &&
+            // Results may sit further back than fixtures: a break in the schedule should not
+            // erase the last thing that happened.
+            it.startsAt >= now - maxOf(48 * hour, historyHoursBack.coerceAtLeast(0) * hour) &&
             (!it.live || it.startsAt >= now - 12 * hour)
     }.distinctBy(WidgetMatch::identity)
     val live = candidates.filter(WidgetMatch::live).sortedBy(WidgetMatch::startsAt)
@@ -77,13 +82,40 @@ internal fun selectWidgetMatches(matches: List<WidgetMatch>, now: Long, limit: I
 /** Keep both sections before applying a display limit, so upcoming matches cannot crowd out history. */
 internal fun selectWidgetScheduleMatches(
     matches: List<WidgetMatch>, now: Long, sectionLimit: Int = 3,
+    historyHoursBack: Long = 48,
 ): List<WidgetMatch> {
-    val candidates = selectWidgetMatches(matches, now, Int.MAX_VALUE)
+    val candidates = selectWidgetMatches(matches, now, Int.MAX_VALUE, historyHoursBack)
     val limit = sectionLimit.coerceAtLeast(0)
     // Preserve the existing priority for the single-match and narrow schedule widgets.
     return candidates.filterNot(WidgetMatch::terminal).take(limit) +
         candidates.filter(WidgetMatch::terminal).take(limit)
 }
+
+/**
+ * The rows a schedule card is allowed to show: at most [maxRows] in total, of which only the
+ * [maxFinished] newest results ride along. Everything else is live or upcoming, so a long run of
+ * finished matches can never fill the card or push the next fixtures off it.
+ *
+ * When nothing is left to play the card fills up with results instead of leaving the panel empty.
+ */
+internal fun widgetCardMatches(
+    matches: List<WidgetMatch>,
+    now: Long,
+    maxRows: Int = WidgetScheduleSizing.MAX_SECTION_ROWS,
+    maxFinished: Int = WidgetScheduleSizing.MAX_FINISHED_ROWS,
+): List<WidgetMatch> {
+    val rows = maxRows.coerceAtLeast(0)
+    // Results get a wider lookback than the fixture window, otherwise a week without a match
+    // leaves the card with only the upcoming rows and nothing to report.
+    val ordered = selectWidgetMatches(matches, now, Int.MAX_VALUE, WIDGET_RESULT_WINDOW_HOURS)
+    val upcoming = ordered.filterNot(WidgetMatch::terminal)
+    val finished = ordered.filter(WidgetMatch::terminal)
+    val results = finished.take(if (upcoming.isEmpty()) rows else maxFinished.coerceAtLeast(0))
+    return upcoming.take((rows - results.size).coerceAtLeast(0)) + results
+}
+
+/** How far back a widget looks for results. A week covers the gaps between rounds. */
+internal const val WIDGET_RESULT_WINDOW_HOURS = 7 * 24L
 
 internal fun WidgetMatch.scoreLabel(): String = when {
     !live && !terminal -> "VS"

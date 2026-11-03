@@ -28,8 +28,11 @@ import dev.kiritoxd.miaopu.data.RatingStage
 import dev.kiritoxd.miaopu.data.RatingTarget
 import dev.kiritoxd.miaopu.data.Schedule
 import dev.kiritoxd.miaopu.data.StageRatingDetail
+import dev.kiritoxd.miaopu.data.Team
+import dev.kiritoxd.miaopu.data.TeamResult
 import dev.kiritoxd.miaopu.data.mergeCommentsByHeat
 import dev.kiritoxd.miaopu.data.isNewerVersion
+import dev.kiritoxd.miaopu.data.recentTeamResults
 import dev.kiritoxd.miaopu.notify.MatchAlerts
 import dev.kiritoxd.miaopu.widget.WidgetUpdates
 import dev.kiritoxd.miaopu.widget.PinnableWidget
@@ -449,6 +452,22 @@ class MiaopuViewModel(
         loadRatings(match)
     }
 
+    /**
+     * Finished matches for one team, newest first, read from the schedules already in memory.
+     * [current] is folded in so a match opened from a widget or a notification still appears
+     * even when the schedule cache has not reached it.
+     *
+     * Hupu exposes no member endpoint, so this is the only non-scraping source; the window is
+     * whatever the schedule covers (roughly six weeks around today).
+     */
+    internal fun teamResults(team: Team, current: MatchSummary? = null, limit: Int = 12): List<TeamResult> {
+        val held = scheduleStates.values.mapNotNull { state -> (state as? LoadState.Ready)?.value }
+            .flatMap { it.days }
+            .flatMap { it.matches }
+        val pool = if (current == null) held else held + current
+        return recentTeamResults(pool, team.id, limit = limit)
+    }
+
     internal fun openWidgetDestination(match: MatchSummary?, sport: Esport?) {
         val currentNavigator = navigator
         if (currentNavigator == null) {
@@ -677,6 +696,12 @@ class MiaopuViewModel(
         }
         if (current is AppScreen.Stage) stageRatingJob?.cancel()
         navigator?.pop()
+        // Leaving a match that was opened from another match's team record lands back on a
+        // detail page. The shared controller was just closed and the ratings still hold the
+        // match we left, so that page has to be rebuilt from its own match.
+        if (current is AppScreen.Ratings) {
+            (screen as? AppScreen.Ratings)?.let { loadRatings(it.match.toModel()) }
+        }
     }
 
     fun dismissMessage() {

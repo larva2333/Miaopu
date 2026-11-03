@@ -3,6 +3,9 @@ package dev.kiritoxd.miaopu.widget
 /** Keeps the default schedule density while allowing taller hosts to reveal more matches. */
 internal object WidgetScheduleSizing {
     const val MAX_SECTION_ROWS = 8
+
+    /** A schedule card never carries more than two results; the rest of the rows are fixtures. */
+    const val MAX_FINISHED_ROWS = 2
     const val MAX_VISIBLE_LOGOS = MAX_SECTION_ROWS * 4
 
     fun visibleRows(contentHeightDp: Int, compact: Boolean, largeFont: Boolean): Int {
