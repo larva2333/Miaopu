@@ -1,6 +1,14 @@
 package dev.kiritoxd.miaopu.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -9,7 +17,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,13 +37,18 @@ import dev.kiritoxd.miaopu.data.Team
 import dev.kiritoxd.miaopu.data.TeamResult
 import dev.kiritoxd.miaopu.data.recordSummary
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private val SheetEnterEasing = CubicBezierEasing(0.15f, 0f, 0.1f, 1f)
+private val SheetExitEasing = CubicBezierEasing(0.4f, 0f, 1f, 1f)
 
 /**
  * Recent results for one team, opened from a crest on the match page. Rows come straight from the
@@ -44,84 +61,130 @@ import java.util.Locale
 internal fun TeamRecordSheet(
     team: Team?,
     results: List<TeamResult>,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
     onOpenMatch: (MatchSummary) -> Unit,
     onDismiss: () -> Unit,
 ) {
     if (team == null) return
+    // AnimatedVisibility(Boolean) 会把首次组合时的值直接当成动画起点，传 true 进来的话
+    // 永远不会播入场动画。必须从一个显式 false 的 MutableTransitionState 起步。
+    val transitionState = remember {
+        MutableTransitionState(false).apply { targetState = true }
+    }
+    var closing by remember { mutableStateOf(false) }
+    val requestClose = {
+        if (!closing) {
+            closing = true
+            transitionState.targetState = false
+        }
+    }
     // Without this the system back would pop the match page out from under the open sheet.
-    BackHandler { onDismiss() }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.32f))
-            // Tapping the dimmed area closes; the panel below swallows its own taps.
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { onDismiss() },
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp)
-                .padding(bottom = 8.dp)
-                .navigationBarsPadding()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { },
-            cornerRadius = 24.dp,
-            insideMargin = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    BackHandler { requestClose() }
+    // 退场动画真正跑完（isIdle）才通知调用方移除，否则浮层会硬切消失。
+    LaunchedEffect(transitionState.isIdle, closing) {
+        if (closing && transitionState.isIdle) onDismiss()
+    }
+    Box(Modifier.fillMaxSize()) {
+        // 遮罩只做淡入；面板再用 animateEnterExit 走自己的滑入轨迹。
+        AnimatedVisibility(
+            visibleState = transitionState,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(200)),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "${team.name} · 近期战绩",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(LucideIcons.X, "关闭近期战绩", Modifier.size(20.dp))
-                }
-            }
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TeamRecordHeader(team, results)
-                if (results.isEmpty()) {
-                    Text(
-                        "赛程范围内还没有这支队伍的已结束比赛",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
-                        contentPadding = PaddingValues(bottom = 8.dp),
-                    ) {
-                        items(results, key = { "team-result-${it.match.uniqueKey}" }) { result ->
-                            TeamRecordRow(result) { onOpenMatch(result.match) }
-                            if (result !== results.last()) TeamRecordDivider()
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    // Tapping the dimmed area closes; the panel below swallows its own taps.
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { requestClose() },
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Card(
+                    modifier = Modifier
+                        .animateEnterExit(
+                            enter = slideInVertically(tween(200, easing = SheetEnterEasing)) { it } +
+                                fadeIn(tween(200)),
+                            exit = slideOutVertically(tween(200, easing = SheetExitEasing)) { it } +
+                                fadeOut(tween(200)),
+                        )
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .padding(bottom = 8.dp)
+                        .navigationBarsPadding()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { },
+                    cornerRadius = 24.dp,
+                    insideMargin = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${team.name} · 近期战绩",
+                            modifier = Modifier.weight(1f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        IconButton(onClick = requestClose) {
+                            Icon(LucideIcons.X, "关闭近期战绩", Modifier.size(20.dp))
                         }
                     }
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TeamRecordHeader(team, results, refreshing)
+                        if (results.isEmpty()) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text(
+                                    if (refreshing) "正在拉取近期比赛…" else "赛程里还没有这支队伍的已结束比赛",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                                if (refreshing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                                } else {
+                                    // The cached schedule may simply predate these results, so offer a pull
+                                    // before telling the reader there is nothing to show.
+                                    TextButton(text = "重新拉取", onClick = onRefresh)
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                                contentPadding = PaddingValues(bottom = 8.dp),
+                            ) {
+                                items(results, key = { "team-result-${it.match.uniqueKey}" }) { result ->
+                                    TeamRecordRow(result) { onOpenMatch(result.match) }
+                                    if (result !== results.last()) TeamRecordDivider()
+                                }
+                            }
+                        }
+                        Text(
+                            "统计来自当前赛程范围内的已结束比赛",
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
                 }
-                Text(
-                    "统计来自当前赛程范围内的已结束比赛",
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    fontSize = 11.sp,
-                    textAlign = TextAlign.Center,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
             }
         }
     }
 }
 
 @Composable
-private fun TeamRecordHeader(team: Team, results: List<TeamResult>) {
+private fun TeamRecordHeader(team: Team, results: List<TeamResult>, refreshing: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 16.dp,
@@ -134,8 +197,8 @@ private fun TeamRecordHeader(team: Team, results: List<TeamResult>) {
                 Text(team.name, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    results.recordSummary()?.let { "近 ${results.size} 场 $it" }
-                        ?: "近 ${results.size} 场",
+                    if (refreshing && results.isEmpty()) "正在拉取…"
+                    else results.recordSummary()?.let { "近 ${results.size} 场 $it" } ?: "近 ${results.size} 场",
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

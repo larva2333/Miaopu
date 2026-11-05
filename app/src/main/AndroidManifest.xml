@@ -24,7 +24,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="unspecified"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -34,6 +34,7 @@
         <activity
             android:name=".widget.MatchWidgetConfigureActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.Miaopu" />
         <receiver android:name=".widget.MatchWidgetProvider" android:exported="true"
             android:label="@string/widget_match_name">

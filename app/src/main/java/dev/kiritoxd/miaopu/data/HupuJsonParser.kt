@@ -29,7 +29,7 @@ object HupuJsonParser {
                     add(
                         ScheduleDay(
                             date = day.stringOrNull("dayTime").orEmpty(),
-                            label = day.stringOrNull("dateBlock").orEmpty(),
+                            label = scheduleDayLabel(day.stringOrNull("dateBlock").orEmpty(), matches),
                             matches = matches,
                         ),
                     )
@@ -152,7 +152,7 @@ object HupuJsonParser {
                         name = group.stringOrNull("groupName") ?: group.stringOrNull("name") ?: "分组",
                         rootNodeId = rootNodeId,
                         sort = group.optInt("sort", index),
-                        logoUrl = group.attributeValue("logo"),
+                        logoUrl = group.attributeValue("logo").secureImageUrl(),
                         teamId = group.attributeValue("teamId"),
                         childCount = group.optInt("childCount", 0),
                     ),
@@ -237,7 +237,7 @@ object HupuJsonParser {
                 val member = members.optJSONObject(index) ?: continue
                 val id = member.stringOrNull("memberId").orEmpty()
                 val name = member.stringOrNull("memberName")
-                val logoUrl = member.stringOrNull("memberLogo")
+                val logoUrl = member.stringOrNull("memberLogo").secureImageUrl()
                 val score = member.stringOrNull("memberBaseScore")
                 if (id.isBlank() && name.isNullOrBlank() && logoUrl.isNullOrBlank() && score.isNullOrBlank()) continue
                 add(
@@ -259,14 +259,14 @@ object HupuJsonParser {
         val featured = json.optJSONObject("scoreItemInfo")?.let {
             FeaturedPlayer(
                 name = it.stringOrNull("name") ?: return@let null,
-                logoUrl = it.stringOrNull("logo"),
+                logoUrl = it.stringOrNull("logo").secureImageUrl(),
                 score = it.stringOrNull("scoreNum"),
                 hotComment = it.stringOrNull("hotComment"),
                 scoreCountText = it.stringOrNull("scoreCountText"),
                 outBizType = it.stringOrNull("scoreOutBizType"),
                 outBizNo = it.stringOrNull("scoreOutBizNo"),
                 jumpLink = it.stringOrNull("jumpLink"),
-                teamLogoUrl = it.stringOrNull("teamLogo"),
+                teamLogoUrl = it.stringOrNull("teamLogo").secureImageUrl(),
             )
         }
         return MatchSummary(
@@ -539,6 +539,16 @@ object HupuJsonParser {
             if (attribute.stringOrNull("key") == key) return attribute.optJSONArray("values")?.stringOrNull(0)
         }
         return null
+    }
+
+    /**
+     * 列表日期带：近几天用「昨天／今天／明天／后天」，再远才写月日，星期统一跟在后面。
+     * 接口给的 dateBlock 只有精确日期，跨天时不会变成「后天」。
+     */
+    private fun scheduleDayLabel(raw: String, matches: List<MatchSummary>): String {
+        val start = matches.firstOrNull { it.startTimeMillis > 0L }?.startTimeMillis
+            ?: return raw
+        return relativeDayWeekdayLabel(start)
     }
 
     private fun formatTime(timeMillis: Long): String = if (timeMillis <= 0L) {

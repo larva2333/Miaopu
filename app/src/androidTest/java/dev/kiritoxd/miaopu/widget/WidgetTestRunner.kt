@@ -193,8 +193,11 @@ class WidgetTestRunner : Instrumentation() {
             }
             store.record(Esport.LOL, Schedule(null, listOf(ScheduleDay("", "", many.map { it.toModel() }))), now + 2)
             check(store.snapshot(Esport.LOL).matches.size <= 60)
-            check(store.state(now).matches.count(WidgetMatch::terminal) == WidgetScheduleSizing.MAX_SECTION_ROWS)
-            check(store.state(now).matches.count { !it.terminal } == WidgetScheduleSizing.MAX_SECTION_ROWS)
+            // Every card leads with the two newest results; the fixtures fill the remaining rows.
+            val rows = widgetVisibleRows(store.state(now).matches, WidgetScheduleSizing.MAX_SECTION_ROWS)
+            check(rows.size == WidgetScheduleSizing.MAX_SECTION_ROWS)
+            check(rows.count(WidgetMatch::terminal) == WidgetScheduleSizing.LEAD_RESULTS)
+            check(rows.count { !it.terminal } == WidgetScheduleSizing.MAX_SECTION_ROWS - WidgetScheduleSizing.LEAD_RESULTS)
         } finally {
             prefs.forEach { context.getSharedPreferences(it, Context.MODE_PRIVATE).edit().clear().commit() }
         }

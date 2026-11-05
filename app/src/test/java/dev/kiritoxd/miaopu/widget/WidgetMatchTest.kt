@@ -20,8 +20,15 @@ class WidgetMatchTest {
 
     @Test fun `excludes old seasons invalid dates and stale live flags`() {
         val input = listOf(match("old", "已结束", now - 49 * hour), match("invalid", "未开始", 0),
-            match("old-live", "进行中", now - 13 * hour), match("far", "未开始", now + 8 * 24 * hour))
+            match("old-live", "进行中", now - 13 * hour), match("far", "未开始", now + 31 * 24 * hour))
         assertTrue(selectWidgetMatches(input, now).isEmpty())
+    }
+
+    @Test fun `looks a month ahead for fixtures`() {
+        val soon = match("soon", "未开始", now + hour)
+        // Play-off slots are announced weeks in advance; a week-long window hid them.
+        val later = match("later", "未开始", now + 25 * 24 * hour)
+        assertEquals(listOf("soon", "later"), selectWidgetMatches(listOf(later, soon), now).map { it.id })
     }
 
     @Test fun `wide schedule retains three results even with many upcoming matches`() {
@@ -46,7 +53,7 @@ class WidgetMatchTest {
         val next = match("next", "未开始", now + hour)
         val input = listOf(done, done, next, next,
             match("old", "已结束", now - 49 * hour), match("stale-live", "进行中", now - 13 * hour),
-            match("past", "未开始", now - hour), match("far", "未开始", now + 8 * 24 * hour),
+            match("past", "未开始", now - hour), match("far", "未开始", now + 31 * 24 * hour),
             next.copy(id = "unknown", businessId = "removed"))
         assertEquals(listOf(next, done), selectWidgetScheduleMatches(input, now))
     }
@@ -74,52 +81,105 @@ class WidgetMatchTest {
         assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS * 2, visible.size)
     }
 
-    @Test fun `card keeps two results and never exceeds eight rows`() {
+    @Test fun `card always leads with the two newest results`() {
         val upcoming = (1..8).map { match("next-$it", "未开始", now + it * hour) }
         val history = (1..5).map { match("done-$it", "已结束", now - it * hour) }
-        val card = widgetCardMatches((upcoming + history).reversed(), now)
+        val card = widgetVisibleRows(widgetCardPool((upcoming + history).reversed(), now), 8)
         assertEquals(8, card.size)
-        assertEquals(2, card.count(WidgetMatch::terminal))
+        // Two results first, then as many of the nearest fixtures as still fit.
         assertEquals(
-            (1..6).map { "next-$it" } + listOf("done-1", "done-2"),
+            listOf("done-2", "done-1") + (1..6).map { "next-$it" },
             card.map { it.id },
         )
     }
 
-    @Test fun `card spends the leftover rows on results when few fixtures remain`() {
-        val card = widgetCardMatches(
+    @Test fun `three rows show two results and the next fixture`() {
+        val matches = (1..3).map { match("next-$it", "未开始", now + it * hour) } +
+            (1..3).map { match("done-$it", "已结束", now - it * hour) }
+        assertEquals(
+            listOf("done-2", "done-1", "next-1"),
+            widgetVisibleRows(widgetCardPool(matches, now), 3).map { it.id },
+        )
+    }
+
+    @Test fun `six rows keep two results and four fixtures`() {
+        val matches = (1..8).map { match("next-$it", "未开始", now + it * hour) } +
+            (1..5).map { match("done-$it", "已结束", now - it * hour) }
+        assertEquals(
+            listOf("done-2", "done-1") + (1..4).map { "next-$it" },
+            widgetVisibleRows(widgetCardPool(matches, now), 6).map { it.id },
+        )
+    }
+
+    @Test fun `older results back fill the rows the fixtures leave empty`() {
+        val pool = widgetCardPool(
             listOf(match("next-1", "未开始", now + hour)) +
                 (1..5).map { match("done-$it", "已结束", now - it * hour) },
             now,
         )
-        assertEquals(listOf("next-1", "done-1", "done-2"), card.map { it.id })
-        assertTrue(widgetCardMatches(emptyList(), now).isEmpty())
+        // One fixture leaves five rows: two leading results plus three older ones.
+        assertEquals(
+            listOf("done-5", "done-4", "done-3", "done-2", "done-1", "next-1"),
+            widgetVisibleRows(pool, 8).map { it.id },
+        )
+        assertTrue(widgetVisibleRows(widgetCardPool(emptyList(), now), 8).isEmpty())
+    }
+
+    @Test fun `card tops up to eight rows when the fixture list is short`() {
+        val upcoming = (1..3).map { match("next-$it", "未开始", now + it * hour) }
+        val history = (1..8).map { match("done-$it", "已结束", now - it * hour) }
+        val card = widgetVisibleRows(widgetCardPool((upcoming + history).reversed(), now), 8)
+        assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS, card.size)
+        assertEquals(3, card.count { !it.terminal })
+        assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS - 3, card.count(WidgetMatch::terminal))
     }
 
     @Test fun `card fills with results when nothing is left to play`() {
-        val card = widgetCardMatches((1..10).map { match("done-$it", "已结束", now - it * hour) }, now)
+        val pool = widgetCardPool((1..10).map { match("done-$it", "已结束", now - it * hour) }, now)
+        val card = widgetVisibleRows(pool, 8)
         assertEquals(WidgetScheduleSizing.MAX_SECTION_ROWS, card.size)
         assertTrue(card.all(WidgetMatch::terminal))
-        assertEquals("done-1", card.first().id)
+        // Still the newest eight, oldest first.
+        assertEquals("done-8", card.first().id)
+        assertEquals("done-1", card.last().id)
+    }
+
+    @Test fun `single result still leads a three row card`() {
+        val matches = listOf(match("done-1", "已结束", now - hour)) +
+            (1..3).map { match("next-$it", "未开始", now + it * hour) }
+        // Nothing to pair the lone result with, so the fixtures take the spare rows.
+        assertEquals(
+            listOf("done-1", "next-1", "next-2"),
+            widgetVisibleRows(widgetCardPool(matches, now), 3).map { it.id },
+        )
+    }
+
+    @Test fun `three visible rows fall back to results once nothing is left to play`() {
+        val matches = (1..4).map { match("done-$it", "已结束", now - it * hour) }
+        assertEquals(
+            listOf("done-3", "done-2", "done-1"),
+            widgetVisibleRows(widgetCardPool(matches, now), 3).map { it.id },
+        )
     }
 
     @Test fun `live match counts against the fixture rows rather than the results`() {
-        val card = widgetCardMatches(
-            listOf(match("live", "进行中", now - hour)) +
+        val pool = widgetCardPool(
+            listOf(match("live", "进行中", now - hour / 2)) +
                 (1..3).map { match("done-$it", "已结束", now - it * hour) },
             now,
         )
-        assertEquals(listOf("live", "done-1", "done-2"), card.map { it.id })
+        val card = widgetVisibleRows(pool, 4)
+        assertEquals(listOf("done-3", "done-2", "done-1", "live"), card.map { it.id })
     }
 
     @Test fun `card still reports a result from beyond the fixture window`() {
         val old = match("done-old", "已结束", now - 72 * hour)
-        val card = widgetCardMatches(listOf(match("next-1", "未开始", now + hour), old), now)
-        assertEquals(listOf("next-1", "done-old"), card.map { it.id })
+        val pool = widgetCardPool(listOf(match("next-1", "未开始", now + hour), old), now)
+        assertEquals(listOf("done-old", "next-1"), widgetVisibleRows(pool, 8).map { it.id })
         // The candidate list keeps its narrow window; only the card reaches back for results.
         assertTrue(selectWidgetMatches(listOf(old), now).isEmpty())
         // Anything past a week is still dropped rather than shown as today's news.
-        assertTrue(widgetCardMatches(listOf(match("stale", "已结束", now - 8 * 24 * hour)), now).isEmpty())
+        assertTrue(widgetCardPool(listOf(match("stale", "已结束", now - 8 * 24 * hour)), now).isEmpty())
     }
 
     @Test fun `does not guess live from a scheduled start time`() {
@@ -159,14 +219,33 @@ class WidgetMatchTest {
         assertFalse(match.copy(outBizNo = null).hasRatings)
     }
 
+    @Test fun `snapshot keeps team ids so a widget tap can resolve records`() {
+        val withIds = match("x", "已结束", now).copy(
+            teams = listOf(
+                WidgetTeam("T1", null, "2", "team-t1"),
+                WidgetTeam("GEN", null, "1", "team-gen"),
+            ),
+        )
+        assertEquals("team-t1", withIds.toModel().teams.first().id)
+        val restored = Json.decodeFromString<WidgetScheduleSnapshot>(
+            Json.encodeToString(WidgetScheduleSnapshot(listOf(withIds), now, now)),
+        )
+        assertEquals("team-t1", restored.matches.first().toModel().teams.first().id)
+        // A cache written before ids existed still loads; it just falls back to the team name.
+        val legacy = withIds.copy(teams = listOf(WidgetTeam("T1", null, "2"), WidgetTeam("GEN", null, "1")))
+        assertEquals("", legacy.toModel().teams.first().id)
+    }
+
     @Test fun `non-today matches include date and follow device timezone`() {
         val zone = TimeZone.getDefault()
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
             val today = Calendar.getInstance().apply { set(2026, 8, 28, 10, 0, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
             val tomorrow = Calendar.getInstance().apply { set(2026, 8, 29, 20, 0, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
-            assertEquals("10:00", match("x", "未开始", today).dateTimeLabel(today))
-            assertEquals("09-29 20:00", match("x", "未开始", tomorrow).dateTimeLabel(today))
+            val further = Calendar.getInstance().apply { set(2026, 9, 3, 20, 0, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
+            assertEquals("今天 10:00", match("x", "未开始", today).dateTimeLabel(today))
+            assertEquals("明天 20:00", match("x", "未开始", tomorrow).dateTimeLabel(today))
+            assertEquals("10月3日 20:00", match("x", "未开始", further).dateTimeLabel(today))
         } finally { TimeZone.setDefault(zone) }
     }
 

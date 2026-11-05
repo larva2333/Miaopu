@@ -33,6 +33,7 @@ import dev.kiritoxd.miaopu.data.TeamResult
 import dev.kiritoxd.miaopu.data.mergeCommentsByHeat
 import dev.kiritoxd.miaopu.data.isNewerVersion
 import dev.kiritoxd.miaopu.data.recentTeamResults
+import dev.kiritoxd.miaopu.data.tournamentPool
 import dev.kiritoxd.miaopu.notify.MatchAlerts
 import dev.kiritoxd.miaopu.widget.WidgetUpdates
 import dev.kiritoxd.miaopu.widget.PinnableWidget
@@ -131,6 +132,9 @@ class MiaopuViewModel(
         private set
     var matchAlertsEnabled: Boolean by mutableStateOf(MatchAlerts.isEnabled(application))
         private set
+    /** True while the team-record sheet is refetching the schedule in the background. */
+    var teamRecordRefreshing: Boolean by mutableStateOf(false)
+        private set
     var updateCheckState: UpdateCheckState by mutableStateOf(UpdateCheckState.Idle)
         private set
     var updateDownloadState: UpdateDownloadState by mutableStateOf(UpdateDownloadState.Idle)
@@ -143,6 +147,7 @@ class MiaopuViewModel(
     private var ratingJob: Job? = null
     private var stageRatingJob: Job? = null
     private var commentJob: Job? = null
+    private var teamRecordJob: Job? = null
     private var moreCommentsJob: Job? = null
     private var publishCommentJob: Job? = null
     private var schedulePollingJob: Job? = null
@@ -453,6 +458,42 @@ class MiaopuViewModel(
     }
 
     /**
+     * 同一赛事的全部对局，用来画晋级图。虎扑没有赛事维度的接口，只能从已加载的赛程里按
+     * `introduction`（如“全球总决赛淘汰赛”）聚合；当前这场始终并进去，避免从通知/小组件
+     * 冷启动时缓存还没覆盖到它。
+     */
+    internal fun tournamentMatches(match: MatchSummary): List<MatchSummary> {
+        val esport = match.esport
+        val ready = (scheduleStates[esport] as? LoadState.Ready)?.value
+        val pool = ready?.days?.flatMap { it.matches }
+            ?: schedules[esport]?.days?.flatMap { it.matches }.orEmpty()
+        val introduction = match.introduction.trim()
+        if (introduction.isEmpty()) return listOf(match)
+        // 决赛常常单独挂在「对决日」这种分组里，按赛事名把它们并进来，否则晋级图会缺顶点。
+        return tournamentPool(pool, match)
+    }
+
+    /** 晋级图需要整段赛事，缓存里只有这一场就先补拉一次赛程。 */
+    internal fun ensureTournamentMatches(match: MatchSummary) {
+        if (tournamentMatches(match).size >= 2) return
+        if (scheduleStateFor(match.esport) is LoadState.Ready) return
+        loadSchedule(esport = match.esport)
+    }
+
+    /**
+     * 同赛事更晚阶段的参赛队伍，也就是小组赛/入围赛的出线名单。赛程接口没有“出线”字段，
+     * 下一阶段的参赛队是唯一可靠的证据。还在同一阶段的队伍（缓存不全）会返回空集，界面上就
+     * 只排战绩、不标晋级。
+     */
+    internal fun advancingTeams(match: MatchSummary): Set<String> {
+        val esport = match.esport
+        val ready = (scheduleStates[esport] as? LoadState.Ready)?.value
+        val pool = ready?.days?.flatMap { it.matches }
+            ?: schedules[esport]?.days?.flatMap { it.matches }.orEmpty()
+        return dev.kiritoxd.miaopu.data.advancingTeams(pool, match.introduction)
+    }
+
+    /**
      * Finished matches for one team, newest first, read from the schedules already in memory.
      * [current] is folded in so a match opened from a widget or a notification still appears
      * even when the schedule cache has not reached it.
@@ -464,8 +505,30 @@ class MiaopuViewModel(
         val held = scheduleStates.values.mapNotNull { state -> (state as? LoadState.Ready)?.value }
             .flatMap { it.days }
             .flatMap { it.matches }
-        val pool = if (current == null) held else held + current
-        return recentTeamResults(pool, team.id, limit = limit)
+        // A forced refresh flips every schedule to Loading. Keep reading the last good copy so the
+        // sheet does not blank out while the pull is in flight.
+        val lastGood = schedules.values.flatMap { it.days }.flatMap { it.matches }
+        val pool = held.ifEmpty { lastGood } + listOfNotNull(current)
+        return recentTeamResults(pool, team, limit = limit)
+    }
+
+    /**
+     * Pulls the schedules again when a team record came back empty — the cached pool can simply
+     * predate the results the reader is looking for. Hupu has no per-team endpoint, so the whole
+     * schedule is refetched and the record is recomputed from it.
+     */
+    internal fun refreshTeamRecord() {
+        if (teamRecordJob?.isActive == true) return
+        teamRecordRefreshing = true
+        adapter.invalidateSharedScheduleCache()
+        teamRecordJob = viewModelScope.launch {
+            try {
+                val jobs = subscribedEsports.mapNotNull { loadSchedule(esport = it, force = true) }
+                jobs.joinAll()
+            } finally {
+                teamRecordRefreshing = false
+            }
+        }
     }
 
     internal fun openWidgetDestination(match: MatchSummary?, sport: Esport?) {

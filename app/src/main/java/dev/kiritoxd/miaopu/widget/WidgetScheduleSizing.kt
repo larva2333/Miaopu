@@ -4,8 +4,9 @@ package dev.kiritoxd.miaopu.widget
 internal object WidgetScheduleSizing {
     const val MAX_SECTION_ROWS = 8
 
-    /** A schedule card never carries more than two results; the rest of the rows are fixtures. */
-    const val MAX_FINISHED_ROWS = 2
+    /** Every card leads with this many finished matches, whatever else it has room for. */
+    const val LEAD_RESULTS = 2
+
     const val MAX_VISIBLE_LOGOS = MAX_SECTION_ROWS * 4
 
     fun visibleRows(contentHeightDp: Int, compact: Boolean, largeFont: Boolean): Int {

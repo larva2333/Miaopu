@@ -14,13 +14,13 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import dev.kiritoxd.miaopu.R
+import dev.kiritoxd.miaopu.data.monthDayWeekdayLabel
+import dev.kiritoxd.miaopu.data.relativeDateTimeLabel
+import dev.kiritoxd.miaopu.data.relativeDayLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.roundToInt
 
 internal object WidgetRenderer {
@@ -132,10 +132,7 @@ internal object WidgetRenderer {
         views.setViewVisibility(R.id.widget_open, if (largeFont) View.GONE else View.VISIBLE)
         val refreshing = refreshStatus == WidgetRefreshStatus.RUNNING
         views.setContentDescription(R.id.widget_refresh, if (refreshing) "正在刷新赛程" else "刷新赛程")
-        val updated = if (state.updatedAt > 0) {
-            SimpleDateFormat(if (now - state.updatedAt > DAY) "MM-dd HH:mm" else "HH:mm", Locale.ROOT)
-                .format(Date(state.updatedAt))
-        } else ""
+        val updated = if (state.updatedAt > 0) relativeDateTimeLabel(state.updatedAt, now) else ""
         val network = context.getSystemService(ConnectivityManager::class.java)
         val online = network.getNetworkCapabilities(network.activeNetwork)
             ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
@@ -155,7 +152,7 @@ internal object WidgetRenderer {
         })
         views.setInt(R.id.widget_empty, "setMaxLines", 3)
         if (wide) {
-            views.setTextViewText(R.id.widget_date, SimpleDateFormat("MM–dd", Locale.ROOT).format(Date(now)))
+            views.setTextViewText(R.id.widget_date, monthDayWeekdayLabel(now))
             views.setViewVisibility(R.id.widget_date, if (largeFont) View.GONE else View.VISIBLE)
             views.setViewVisibility(R.id.widget_rows, if (empty) View.GONE else View.VISIBLE)
             views.removeAllViews(R.id.widget_rows)
@@ -180,16 +177,11 @@ internal object WidgetRenderer {
                 bindColumn(R.id.widget_recent_rows, R.id.widget_recent_empty, state.matches.filterNot(WidgetMatch::terminal))
                 views.addView(R.id.widget_rows, columns)
             } else {
-                // Pin the two most recent finished matches on top (chronological order), then
-                // live/upcoming. Once everything has finished, fill the panel with all results,
-                // oldest first, so time always runs top to bottom.
-                val upcoming = state.matches.filterNot(WidgetMatch::terminal)
-                val rows = if (upcoming.isEmpty()) {
-                    state.matches.filter(WidgetMatch::terminal).sortedBy(WidgetMatch::startsAt)
-                } else {
-                    recentFinished(state.matches) + upcoming
-                }
-                rows.take(rowCount).forEach { match ->
+                // Two results lead the card, the nearest fixtures fill the rest, older results
+                // back-fill a short fixture list. [WidgetScheduleStore.state] hands over a pool
+                // covering every size; the row budget is only known here, so the cut happens now.
+                val rows = widgetVisibleRows(state.matches, rowCount)
+                rows.forEach { match ->
                     views.addView(R.id.widget_rows, row(context, id, match, now, largeFont))
                 }
             }
@@ -202,7 +194,12 @@ internal object WidgetRenderer {
             views.setViewVisibility(R.id.widget_status, if (empty) View.INVISIBLE else View.VISIBLE)
             views.setViewVisibility(R.id.widget_competition, if (empty || contentHeight < 155 || largeFont) View.GONE else View.VISIBLE)
             single?.let { match ->
-                views.setTextViewText(R.id.widget_status, if (match.live) "● ${match.status}" else if (match.terminal) match.status else "${SimpleDateFormat("MM-dd HH:mm", Locale.ROOT).format(Date(match.startsAt))}")
+                // Live and finished matches keep their status word; only upcoming shows a time.
+                views.setTextViewText(R.id.widget_status, when {
+                    match.live -> "● ${match.status}"
+                    match.terminal -> match.status
+                    else -> match.dateTimeLabel(now)
+                })
                 views.textColor(context, R.id.widget_status, if (match.live) R.color.widget_accent else R.color.widget_secondary)
                 views.setTextViewText(R.id.widget_competition, match.competition.ifBlank { match.name })
                 views.setTextViewText(R.id.widget_score, match.scoreLabel())
@@ -218,23 +215,16 @@ internal object WidgetRenderer {
         return views
     }
 
-    /** The two most recently finished matches, oldest first, so the panel reads chronologically. */
-    private fun recentFinished(matches: List<WidgetMatch>): List<WidgetMatch> =
-        matches.filter(WidgetMatch::terminal)
-            .sortedByDescending(WidgetMatch::startsAt)
-            .take(2)
-            .asReversed()
-
     private fun row(context: Context, id: Int, match: WidgetMatch, now: Long, largeFont: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_row)
-        val upcoming = !match.live && !match.terminal
+        // Finished and live matches show their status word; upcoming ones show the clock + day.
         views.setTextViewText(R.id.widget_row_status, when {
             match.live -> match.status
             match.terminal -> match.status
             else -> match.widgetTime(now, context)
         })
         // Upcoming rows carry a second, smaller day line ("今天"/date) under the clock.
-        views.setInt(R.id.widget_row_status, "setMaxLines", if (upcoming) 2 else 1)
+        views.setInt(R.id.widget_row_status, "setMaxLines", if (match.live || match.terminal) 1 else 2)
         // Finished matches read as muted, live matches as accent, upcoming ones as normal text.
         val statusColor = when {
             match.live -> R.color.widget_accent
@@ -269,13 +259,8 @@ internal object WidgetRenderer {
         }
     }
 
-    private fun WidgetMatch.dayLabel(now: Long): String = when (val days = startDayOffset(now)) {
-        0 -> "今天"
-        1 -> "明天"
-        2 -> "后天"
-        -1 -> "昨天"
-        else -> SimpleDateFormat("MM-dd", Locale.ROOT).format(Date(startsAt))
-    }
+    private fun WidgetMatch.dayLabel(now: Long): String =
+        if (startsAt <= 0L) timeLabel.ifBlank { "待定" } else relativeDayLabel(startsAt, now)
 
     private fun bindTeams(context: Context, views: RemoteViews, match: WidgetMatch, wide: Boolean) {
         val logos = if (wide) intArrayOf(R.id.widget_row_logo_0, R.id.widget_row_logo_1) else intArrayOf(R.id.widget_logo_0, R.id.widget_logo_1)
@@ -301,6 +286,4 @@ internal object WidgetRenderer {
         if (Build.VERSION.SDK_INT >= 31) setColor(viewId, "setTextColor", color)
         else setTextColor(viewId, context.getColor(color))
     }
-
-    private const val DAY = 24 * 60 * 60_000L
 }

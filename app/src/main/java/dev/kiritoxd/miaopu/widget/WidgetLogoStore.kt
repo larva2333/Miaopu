@@ -8,6 +8,7 @@ import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
+import dev.kiritoxd.miaopu.data.secureImageUrl
 import dev.kiritoxd.miaopu.data.trimTransparent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -38,7 +39,7 @@ internal class WidgetLogoStore(private val context: Context) {
         loadMutex.withLock {
             directory.mkdirs()
             val changed = coroutineScope {
-                matches.flatMap { it.teams }.mapNotNull { it.logoUrl }
+                matches.flatMap { it.teams }.mapNotNull { it.logoUrl?.secureImageUrl() }
                     .filter { it.startsWith("https://") }.distinct()
                     .take(WidgetScheduleSizing.MAX_VISIBLE_LOGOS).map { url ->
                         async {
@@ -82,7 +83,9 @@ internal class WidgetLogoStore(private val context: Context) {
     }
 
     private fun fileFor(url: String): File {
-        val digest = MessageDigest.getInstance("SHA-256").digest(url.toByteArray())
+        // 规范化后取指纹：渲染侧传进来的还是原始地址，两边必须算出同一个文件名。
+        val normalized = url.secureImageUrl().orEmpty()
+        val digest = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray())
             .joinToString("") { "%02x".format(it) }
         return File(directory, "$digest.png")
     }

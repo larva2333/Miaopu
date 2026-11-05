@@ -5,13 +5,20 @@ import dev.kiritoxd.miaopu.data.MatchSummary
 import dev.kiritoxd.miaopu.data.Team
 import dev.kiritoxd.miaopu.data.isLive
 import dev.kiritoxd.miaopu.data.isTerminal
+import dev.kiritoxd.miaopu.data.relativeDateTimeLabel
 import kotlinx.serialization.Serializable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 @Serializable
-internal data class WidgetTeam(val name: String, val logoUrl: String?, val score: String?)
+internal data class WidgetTeam(
+    val name: String,
+    val logoUrl: String?,
+    val score: String?,
+    /** Kept so a match opened from the widget can still resolve team records by id. */
+    val id: String = "",
+)
 
 /** Only public schedule data is persisted; no account or comment data. */
 @Serializable
@@ -44,7 +51,7 @@ internal data class WidgetMatch(
         statusCode = statusCode,
         startTimeMillis = startsAt,
         startTimeLabel = timeLabel,
-        teams = teams.map { Team("", it.name, it.logoUrl, it.score, false) },
+        teams = teams.map { Team(it.id, it.name, it.logoUrl, it.score, false) },
         outBizType = outBizType,
         outBizNo = outBizNo,
         uniqueKey = uniqueKey,
@@ -55,7 +62,7 @@ internal data class WidgetMatch(
 
 internal fun MatchSummary.toWidgetMatch() = WidgetMatch(
     id, esport.businessId, name, introduction, status, statusCode, startTimeMillis,
-    startTimeLabel, teams.take(2).map { WidgetTeam(it.name, it.logoUrl, it.score) },
+    startTimeLabel, teams.take(2).map { WidgetTeam(it.name, it.logoUrl, it.score, it.id) },
     outBizType, outBizNo, uniqueKey,
 )
 
@@ -66,7 +73,7 @@ internal fun selectWidgetMatches(
     val hour = 60 * 60 * 1000L
     val candidates = matches.filter {
         EsportCatalog.byBusinessId(it.businessId) != null &&
-            it.startsAt <= now + 7 * 24 * hour &&
+            it.startsAt <= now + WIDGET_FIXTURE_WINDOW_HOURS * hour &&
             // Results may sit further back than fixtures: a break in the schedule should not
             // erase the last thing that happened.
             it.startsAt >= now - maxOf(48 * hour, historyHoursBack.coerceAtLeast(0) * hour) &&
@@ -92,27 +99,50 @@ internal fun selectWidgetScheduleMatches(
 }
 
 /**
- * The rows a schedule card is allowed to show: at most [maxRows] in total, of which only the
- * [maxFinished] newest results ride along. Everything else is live or upcoming, so a long run of
- * finished matches can never fill the card or push the next fixtures off it.
- *
- * When nothing is left to play the card fills up with results instead of leaving the panel empty.
+ * The pool a card picks its rows from: live and upcoming matches first, then the newest results.
+ * It is deliberately wider than one card — every widget size derives its own row count from it —
+ * and the order is kept as [selectWidgetScheduleMatches] left it, so the single-match widget still
+ * opens the next fixture rather than an old result.
  */
-internal fun widgetCardMatches(
+internal fun widgetCardPool(
     matches: List<WidgetMatch>,
     now: Long,
-    maxRows: Int = WidgetScheduleSizing.MAX_SECTION_ROWS,
-    maxFinished: Int = WidgetScheduleSizing.MAX_FINISHED_ROWS,
-): List<WidgetMatch> {
-    val rows = maxRows.coerceAtLeast(0)
+    perSection: Int = WidgetScheduleSizing.MAX_SECTION_ROWS,
+): List<WidgetMatch> = selectWidgetScheduleMatches(
+    matches,
+    now,
+    perSection,
     // Results get a wider lookback than the fixture window, otherwise a week without a match
     // leaves the card with only the upcoming rows and nothing to report.
-    val ordered = selectWidgetMatches(matches, now, Int.MAX_VALUE, WIDGET_RESULT_WINDOW_HOURS)
-    val upcoming = ordered.filterNot(WidgetMatch::terminal)
-    val finished = ordered.filter(WidgetMatch::terminal)
-    val results = finished.take(if (upcoming.isEmpty()) rows else maxFinished.coerceAtLeast(0))
-    return upcoming.take((rows - results.size).coerceAtLeast(0)) + results
+    WIDGET_RESULT_WINDOW_HOURS,
+)
+
+/**
+ * The rows a card actually paints.
+ *
+ * The newest [WidgetScheduleSizing.LEAD_RESULTS] results always claim the top rows — the last
+ * thing that happened is the reason the card is on the home screen — and the nearest live or
+ * upcoming matches fill whatever is left. Only when the fixtures run out (the tail of a round,
+ * the gap before a play-off series) do older results back-fill the card instead of leaving it
+ * short, so a card with nothing left to play fills up entirely with history.
+ *
+ * Rows read top to bottom in time order: results oldest-first, then the fixtures.
+ */
+internal fun widgetVisibleRows(matches: List<WidgetMatch>, rowCount: Int): List<WidgetMatch> {
+    val capacity = rowCount.coerceAtLeast(0)
+    if (capacity == 0) return emptyList()
+    val results = matches.filter(WidgetMatch::terminal).sortedByDescending(WidgetMatch::startsAt)
+    val fixtures = matches.filterNot(WidgetMatch::terminal).sortedBy(WidgetMatch::startsAt)
+    val lead = results.take(minOf(WidgetScheduleSizing.LEAD_RESULTS, capacity))
+    val fixtureSlots = (capacity - lead.size).coerceAtLeast(0)
+    val next = fixtures.take(fixtureSlots)
+    val filler = results.drop(lead.size).take((fixtureSlots - next.size).coerceAtLeast(0))
+    return (lead + filler).sortedBy(WidgetMatch::startsAt) + next
 }
+
+/** How far ahead a widget looks for fixtures: a whole month, so a break between rounds or the
+ *  gap before a play-off series still surfaces the next block of matches. */
+internal const val WIDGET_FIXTURE_WINDOW_HOURS = 30 * 24L
 
 /** How far back a widget looks for results. A week covers the gaps between rounds. */
 internal const val WIDGET_RESULT_WINDOW_HOURS = 7 * 24L
@@ -123,11 +153,10 @@ internal fun WidgetMatch.scoreLabel(): String = when {
     else -> status.ifBlank { "暂无比分" }
 }
 
+/** 和 App 内其它位置同一套：近几天写「今天 10:00」，再远才写「11月7日 10:00」。 */
 internal fun WidgetMatch.dateTimeLabel(now: Long): String {
     if (startsAt <= 0L) return timeLabel.ifBlank { "时间待定" }
-    val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT)
-    val pattern = if (dayFormat.format(Date(startsAt)) == dayFormat.format(Date(now))) "HH:mm" else "MM-dd HH:mm"
-    return SimpleDateFormat(pattern, Locale.ROOT).format(Date(startsAt))
+    return relativeDateTimeLabel(startsAt, now)
 }
 
 /** Calendar days in the device timezone, including DST and month/year boundaries. */

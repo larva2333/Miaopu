@@ -41,10 +41,16 @@ fun ErrorPane(
 }
 
 @Composable
-fun EmptyPane(message: String, modifier: Modifier = Modifier) {
+fun EmptyPane(
+    message: String,
+    modifier: Modifier = Modifier,
+    badge: (@Composable () -> Unit)? = null,
+) {
+    val badgeContent: @Composable () -> Unit = badge ?: { DefaultMessageBadge() }
     CenteredMessage(
         title = "暂时空空的",
         summary = message,
         modifier = modifier,
+        badge = badgeContent,
     )
 }

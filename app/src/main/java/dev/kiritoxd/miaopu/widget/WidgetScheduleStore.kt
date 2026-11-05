@@ -46,11 +46,12 @@ internal class WidgetScheduleStore(private val context: Context) {
         } else {
             WidgetScheduleSnapshot(
                 // Results are cached with the same lookback the card renders with, otherwise a
-                // finished match would be dropped on write and never reach the widget.
+                // finished match would be dropped on write and never reach the widget. The
+                // section budget is generous because the fixture window is a whole month.
                 matches = selectWidgetScheduleMatches(
                     schedule.days.flatMap { it.matches }.map { it.toWidgetMatch() },
                     startedAt,
-                    30,
+                    60,
                     WIDGET_RESULT_WINDOW_HOURS,
                 ),
                 updatedAt = System.currentTimeMillis(),
@@ -63,9 +64,11 @@ internal class WidgetScheduleStore(private val context: Context) {
     fun state(now: Long): WidgetScheduleState {
         val snapshots = EsportSubscriptionStore(context).subscriptions().map(::snapshot)
         return WidgetScheduleState(
-            // The card budget, not the whole pool: at most two results plus the fixtures that fit.
-            // The picker still offers every candidate through [candidates].
-            matches = widgetCardMatches(snapshots.flatMap { it.matches }, now),
+            // Both sections, each wide enough for the tallest card: every widget size picks its own
+            // rows out of this pool ([widgetVisibleRows]), so a short card and a tall one must not
+            // be served a list that was already trimmed for the other. The picker still offers
+            // every candidate through [candidates].
+            matches = widgetCardPool(snapshots.flatMap { it.matches }, now),
             updatedAt = snapshots.map { it.updatedAt }.filter { it > 0 }.minOrNull() ?: 0,
             failed = snapshots.any { it.failed },
             hasFetched = snapshots.any { it.attemptedAt > 0 },

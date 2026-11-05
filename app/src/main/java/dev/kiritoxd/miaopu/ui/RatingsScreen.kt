@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.kiritoxd.miaopu.data.StageRatingDetail
+import dev.kiritoxd.miaopu.data.buildTournamentBracket
 import dev.kiritoxd.miaopu.data.matchdetail.MatchStats
 import dev.kiritoxd.miaopu.data.MatchSummary
 import dev.kiritoxd.miaopu.data.Team
@@ -28,6 +29,24 @@ fun RatingsScreen(viewModel: MiaopuViewModel, match: MatchSummary) {
     val dataListState = rememberLazyListState()
     var page by rememberSaveable(match.uniqueKey) { mutableIntStateOf(0) }
     var recordTeam by remember(match.uniqueKey) { mutableStateOf<Team?>(null) }
+    var bracketOpen by remember(match.uniqueKey) { mutableStateOf(false) }
+    // 晋级图要整段赛事才有意义；画不出来（只有一场、或不是淘汰赛）时入口不出现，
+    // 免得点开是个空浮层。
+    val tournamentPool = viewModel.tournamentMatches(match)
+    // 小组赛 / 入围赛的出线名单：取同赛事后续阶段真正登场的队伍。
+    val tournamentAdvanced = remember(tournamentPool, match.uniqueKey) {
+        viewModel.advancingTeams(match)
+    }
+    val tournamentBracket = remember(tournamentPool, match.uniqueKey, tournamentAdvanced) {
+        buildTournamentBracket(
+            matches = tournamentPool,
+            title = match.introduction.ifBlank { match.name },
+            focusKey = match.uniqueKey,
+            advancedNames = tournamentAdvanced,
+        )
+    }
+    val bracketAvailable = tournamentBracket != null ||
+        viewModel.scheduleStateFor(match.esport) is LoadState.Loading
     // Reads the schedules already in memory, so opening the sheet never waits on the network.
     val recordResults by remember(match.uniqueKey) {
         derivedStateOf { recordTeam?.let { viewModel.teamResults(it, match) }.orEmpty() }
@@ -87,7 +106,15 @@ fun RatingsScreen(viewModel: MiaopuViewModel, match: MatchSummary) {
         detail.bind(match)
         detail.ensureStats()
     }
+    // Nothing cached for this team is not the same as "no matches": the schedule in memory may
+    // predate the results, so pull once before the sheet claims the record is empty.
+    LaunchedEffect(recordTeam) {
+        val team = recordTeam ?: return@LaunchedEffect
+        if (viewModel.teamResults(team, match).isEmpty()) viewModel.refreshTeamRecord()
+    }
     LaunchedEffect(match.uniqueKey, selectedStage) { selectedStage?.let(detail::loadStage) }
+    // 从通知或小组件冷启动时赛程还没进内存，先补一次，晋级图入口才不会凭空空着。
+    LaunchedEffect(match.uniqueKey) { viewModel.ensureTournamentMatches(match) }
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
@@ -110,7 +137,16 @@ fun RatingsScreen(viewModel: MiaopuViewModel, match: MatchSummary) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item(key = "hero") {
-                    MatchHero(match.withLiveScore(liveScore), liveScore, onTeamClick = { team -> recordTeam = team })
+                    MatchHero(
+                        match.withLiveScore(liveScore),
+                        liveScore,
+                        onTeamClick = { team -> recordTeam = team },
+                        onCompetitionClick = if (bracketAvailable) {
+                            { bracketOpen = true }
+                        } else {
+                            null
+                        },
+                    )
                 }
                 if (visibleHeader == null) {
                     item(key = "initial-loading") { DetailNotice("正在加载比赛详情", loading = true) }
@@ -213,12 +249,26 @@ fun RatingsScreen(viewModel: MiaopuViewModel, match: MatchSummary) {
     TeamRecordSheet(
         team = recordTeam,
         results = recordResults,
+        refreshing = viewModel.teamRecordRefreshing,
+        onRefresh = viewModel::refreshTeamRecord,
         onOpenMatch = { picked ->
             recordTeam = null
             viewModel.openMatch(picked)
         },
         onDismiss = { recordTeam = null },
     )
+    if (bracketOpen) {
+        TournamentBracketSheet(
+            title = match.introduction.ifBlank { match.name },
+            bracket = tournamentBracket,
+            loading = viewModel.scheduleStateFor(match.esport) is LoadState.Loading,
+            onOpenMatch = { picked ->
+                bracketOpen = false
+                if (picked.uniqueKey != match.uniqueKey) viewModel.openMatch(picked)
+            },
+            onDismiss = { bracketOpen = false },
+        )
+    }
 }
 
 @Composable

@@ -34,6 +34,7 @@ import coil3.request.ImageRequest
 import coil3.request.transformations
 import dev.kiritoxd.miaopu.data.Team
 import dev.kiritoxd.miaopu.data.TrimTransparentTransformation
+import dev.kiritoxd.miaopu.data.secureImageUrl
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -142,12 +143,17 @@ internal fun LogoImage(
     contentScale: ContentScale = ContentScale.Fit,
 ) {
     val context = LocalContext.current
+    // 老数据的 http 地址会被明文流量策略拦掉（韩国、阿联酋这些国家队的队徽就是），
+    // 这里再兜一次协议升级，免得别的入口漏了。
+    val safeUrl = remember(url) { url.secureImageUrl() }
     AsyncImage(
-        model = remember(url) {
-            ImageRequest.Builder(context)
-                .data(url)
-                .transformations(TrimTransparentTransformation())
-                .build()
+        model = remember(safeUrl) {
+            safeUrl?.let {
+                ImageRequest.Builder(context)
+                    .data(it)
+                    .transformations(TrimTransparentTransformation())
+                    .build()
+            }
         },
         contentDescription = null,
         modifier = modifier,
@@ -242,11 +248,25 @@ internal fun CompactTeamLine(team: Team) {
 }
 
 @Composable
+internal fun DefaultMessageBadge() {
+    Box(
+        Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("喵", color = MiuixTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
 internal fun CenteredMessage(
     title: String,
     summary: String,
     modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null,
+    badge: @Composable () -> Unit = { DefaultMessageBadge() },
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -254,15 +274,7 @@ internal fun CenteredMessage(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(
-                Modifier
-                    .size(52.dp)
-                    .clip(CircleShape)
-                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("喵", color = MiuixTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            }
+            badge()
             Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             Text(
                 summary,
