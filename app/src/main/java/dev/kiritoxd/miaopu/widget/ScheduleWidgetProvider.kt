@@ -6,10 +6,14 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+
+/** Keep the direct tap inside the receiver's goAsync window; the scheduled job covers the rest. */
+private const val MANUAL_FETCH_TIMEOUT_MILLIS = 8_000L
 
 class MatchWidgetProvider : BaseScheduleWidgetProvider()
 class ScheduleWidgetProvider : BaseScheduleWidgetProvider()
@@ -17,8 +21,21 @@ class ScheduleWidgetProvider : BaseScheduleWidgetProvider()
 open class BaseScheduleWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == WidgetIntents.REFRESH) {
+            // A tap must fetch data itself: on some launchers the queued job never starts.
+            // The scheduled job stays as a system-protected fallback and drives the footer state.
             WidgetRefreshService.enqueue(context, manual = true)
-            render(context)
+            val pending = goAsync()
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                try {
+                    WidgetDataRefresh.run(context.applicationContext, timeoutMillis = MANUAL_FETCH_TIMEOUT_MILLIS)
+                } catch (cancelled: CancellationException) {
+                    android.util.Log.w("MiaopuWidget", "Manual refresh was cancelled")
+                } catch (error: Exception) {
+                    android.util.Log.w("MiaopuWidget", "Manual refresh failed", error)
+                } finally {
+                    pending.finish()
+                }
+            }
         } else {
             super.onReceive(context, intent)
         }

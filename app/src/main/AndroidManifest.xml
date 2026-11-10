@@ -40,6 +40,7 @@
             android:label="@string/widget_match_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="dev.kiritoxd.miaopu.REFRESH_WIDGET" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_match_info" />
         </receiver>
@@ -47,6 +48,7 @@
             android:label="@string/widget_schedule_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="dev.kiritoxd.miaopu.REFRESH_WIDGET" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_schedule_info" />
         </receiver>

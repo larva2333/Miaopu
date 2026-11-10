@@ -24,60 +24,26 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.IOException
 
-/** Network work is owned by JobScheduler, never by the receiver's short lifetime. */
+/** Scheduled refreshes run here so JobScheduler keeps the process alive; a manual tap may also
+ * fetch directly through [WidgetDataRefresh] while this job acts as the system-level fallback. */
 class WidgetRefreshService : JobService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var refresh: Job? = null
 
     override fun onStartJob(params: JobParameters): Boolean {
         if (WidgetRenderer.ids(this).isEmpty()) return false
-        val adapter = HupuAdapter(HupuCookieSession(this))
         requests.started(params, params.extras.getString(REQUEST_ID).orEmpty())
         refresh = scope.launch {
             var completed = false
             var failed = false
             try {
-                WidgetRenderer.renderAll(this@WidgetRefreshService)
-                val subscriptions = EsportSubscriptionStore(this@WidgetRefreshService).subscriptions()
-                val store = WidgetScheduleStore(this@WidgetRefreshService)
-                val concurrency = Semaphore(3)
-                coroutineScope {
-                    subscriptions.map { sport ->
-                        async(Dispatchers.IO) {
-                            concurrency.withPermit {
-                                val startedAt = System.currentTimeMillis()
-                                val schedule = try {
-                                    val result = adapter.getSchedule(sport)
-                                    if (result.data == null) {
-                                        android.util.Log.w("MiaopuWidget", "Schedule unavailable for ${sport.businessId}: ${result.status}, HTTP ${result.error?.httpCode}")
-                                    }
-                                    result.data
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (error: Exception) {
-                                    android.util.Log.w("MiaopuWidget", "Schedule unavailable for ${sport.businessId}", error)
-                                    null
-                                }
-                                store.record(sport, schedule, startedAt)
-                            }
-                        }
-                    }.awaitAll()
-                }
-                WidgetRenderer.renderAll(this@WidgetRefreshService)
-                try {
-                    val state = store.state(System.currentTimeMillis())
-                    val matches = WidgetRenderer.matchesForLogos(this@WidgetRefreshService, state)
-                    if (WidgetLogoStore(this@WidgetRefreshService).load(matches)) {
-                        WidgetRenderer.renderAll(this@WidgetRefreshService)
-                    }
-                } catch (_: IOException) {
-                    // Score data is still usable when a thumbnail cannot be stored.
-                }
+                WidgetDataRefresh.run(this@WidgetRefreshService)
                 completed = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -136,6 +102,9 @@ class WidgetRefreshService : JobService() {
                     val builder = JobInfo.Builder(JOB_ID, ComponentName(context, WidgetRefreshService::class.java))
                         .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                         .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                        // A queued refresh must survive a reboot; otherwise a launcher that
+                        // throttles jobs can leave the widget stale until the app is opened.
+                        .setPersisted(true)
                         .setExtras(PersistableBundle().apply {
                             putString(REQUEST_ID, request.id)
                             putBoolean(MANUAL, request.manual)
@@ -163,5 +132,59 @@ class WidgetRefreshService : JobService() {
             scheduler.getPendingJob(JOB_ID)?.extras?.let {
                 WidgetRefreshRequest(it.getString(REQUEST_ID).orEmpty(), it.getBoolean(MANUAL))
             }
+    }
+}
+
+/** The network fetch itself, shared by the scheduled job and a direct manual refresh tap. */
+internal object WidgetDataRefresh {
+    /**
+     * [timeoutMillis] bounds work started from a broadcast receiver, whose goAsync window is
+     * short. A timeout leaves whatever was already written in the store and lets the scheduled
+     * job finish the rest.
+     */
+    suspend fun run(context: Context, timeoutMillis: Long? = null) {
+        val app = context.applicationContext
+        if (WidgetRenderer.ids(app).isEmpty()) return
+        if (timeoutMillis == null) fetch(app)
+        else withTimeoutOrNull(timeoutMillis) { fetch(app) }
+    }
+
+    private suspend fun fetch(app: Context) {
+        val adapter = HupuAdapter(HupuCookieSession(app))
+        // Repaint the cached card immediately, then replace it once the network responds.
+        WidgetRenderer.renderAll(app)
+        val subscriptions = EsportSubscriptionStore(app).subscriptions()
+        val store = WidgetScheduleStore(app)
+        val concurrency = Semaphore(3)
+        coroutineScope {
+            subscriptions.map { sport ->
+                async(Dispatchers.IO) {
+                    concurrency.withPermit {
+                        val startedAt = System.currentTimeMillis()
+                        val schedule = try {
+                            val result = adapter.getSchedule(sport)
+                            if (result.data == null) {
+                                android.util.Log.w("MiaopuWidget", "Schedule unavailable for ${sport.businessId}: ${result.status}, HTTP ${result.error?.httpCode}")
+                            }
+                            result.data
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            android.util.Log.w("MiaopuWidget", "Schedule unavailable for ${sport.businessId}", error)
+                            null
+                        }
+                        store.record(sport, schedule, startedAt)
+                    }
+                }
+            }.awaitAll()
+        }
+        WidgetRenderer.renderAll(app)
+        try {
+            val state = store.state(System.currentTimeMillis())
+            val matches = WidgetRenderer.matchesForLogos(app, state)
+            if (WidgetLogoStore(app).load(matches)) WidgetRenderer.renderAll(app)
+        } catch (_: IOException) {
+            // Score data is still usable when a thumbnail cannot be stored.
+        }
     }
 }

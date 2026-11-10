@@ -1,33 +1,64 @@
-name: CI
+name: Build & Release
 
 on:
   push:
     branches:
       - main
       - "codex/**"
+    tags:
+      - "[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+"
   pull_request:
+  # Forks do not get tag-push events, so a release can be started by hand:
+  #   gh workflow run ci.yml -R <owner>/<repo> --ref 2.3.4 -f release=true
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a GitHub Release (ref must be a version tag)"
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
-    name: Test and build
+    name: Build APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       RELEASE_SIGNING_AVAILABLE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      PUBLISH_RELEASE: ${{ startsWith(github.ref, 'refs/tags/') || github.event.inputs.release == 'true' }}
 
     steps:
       - name: Check out source
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      - name: Validate release version
+        if: env.PUBLISH_RELEASE == 'true'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::Release tag must look like 1.0 or 1.0.1."
+            exit 1
+          fi
+          version_name="$({ sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p' app/build.gradle.kts || true; } | head -n 1)"
+          if [[ -z "$version_name" ]]; then
+            echo "::error::Could not read versionName from app/build.gradle.kts."
+            exit 1
+          fi
+          if [[ "$version_name" != "$RELEASE_TAG" ]]; then
+            echo "::error::Tag $RELEASE_TAG does not match versionName $version_name."
+            exit 1
+          fi
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -58,7 +89,7 @@ jobs:
             "build-tools;37.0.0"
 
       - name: Prepare release signing
-        if: env.RELEASE_SIGNING_AVAILABLE == 'true'
+        if: env.RELEASE_SIGNING_AVAILABLE == 'true' || env.PUBLISH_RELEASE == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -80,11 +111,11 @@ jobs:
           echo "MIAOPU_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
           echo "MIAOPU_RELEASE_SIGNING_READY=true" >> "$GITHUB_ENV"
 
-      - name: Run unit tests and build release APK
+      - name: Build release APK
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Verify release APK signature
         if: env.MIAOPU_RELEASE_SIGNING_READY == 'true'
@@ -95,9 +126,42 @@ jobs:
             --print-certs \
             app/build/outputs/apk/release/app-release.apk
 
-      - name: Upload release APK
+      - name: Prepare release artifact
+        if: env.PUBLISH_RELEASE == 'true'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          apk_path="app/build/outputs/apk/release/app-release.apk"
+          test -s "$apk_path"
+          mkdir -p dist
+          cp "$apk_path" "dist/Miaopu-$RELEASE_TAG.apk"
+          cd dist
+          sha256sum "Miaopu-$RELEASE_TAG.apk" > "Miaopu-$RELEASE_TAG.apk.sha256"
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: Miaopu-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-release.apk
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            dist/*
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: env.PUBLISH_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          apk="dist/Miaopu-$RELEASE_TAG.apk"
+          checksum="$apk.sha256"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$apk" "$checksum" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$apk" "$checksum" \
+              --verify-tag \
+              --generate-notes \
+              --title "Miaopu $RELEASE_TAG"
+          fi

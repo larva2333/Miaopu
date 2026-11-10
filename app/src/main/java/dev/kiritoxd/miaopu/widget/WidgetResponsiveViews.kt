@@ -12,6 +12,13 @@ internal fun responsiveWidgetViews(
     options: Bundle, wide: Boolean, create: (width: Int, height: Int) -> RemoteViews,
 ): RemoteViews {
     val sizes = responsiveWidgetSizes(options, wide)
+    // A size map with a single entry buys nothing, but some launcher builds (notably HyperOS)
+    // pick a size-map layout only while the widget is being created and then keep reusing that
+    // first RemoteViews for every later push. A plain RemoteViews is re-applied on every update.
+    if (sizes.size == 1) {
+        val (onlyWidth, onlyHeight) = sizes.single()
+        return create(onlyWidth, onlyHeight)
+    }
     return if (Build.VERSION.SDK_INT >= 31) {
         RemoteViews(sizes.associate { (width, height) ->
             SizeF(width.toFloat(), height.toFloat()) to create(width, height)

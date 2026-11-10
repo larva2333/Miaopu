@@ -157,9 +157,14 @@ class MiaopuViewModel(
     var refreshToast: String? by mutableStateOf(null)
         private set
 
+    private var initialLoadPending = true
+
     init {
         loadSubscribedSchedules()
     }
+
+    /** True once, for the ViewModel whose init just performed the cold-start network load. */
+    internal fun consumeInitialLoad(): Boolean = initialLoadPending.also { initialLoadPending = false }
 
     internal fun attachNavigator(nextNavigator: MiaopuNavigator) {
         if (navigator === nextNavigator) return
@@ -275,6 +280,26 @@ class MiaopuViewModel(
     fun refreshHomeSchedules() {
         adapter.invalidateSharedScheduleCache()
         loadSubscribedSchedules(force = true)
+    }
+
+    /**
+     * The single automatic network refresh for a foreground session. Schedule loads publish into
+     * WidgetScheduleStore, so the same requests refresh both the pages and the widgets. A detail
+     * page opened from a widget also reloads its ratings and match data.
+     */
+    internal fun onAppOpened() {
+        refreshHomeSchedules()
+        when (val current = screen) {
+            is AppScreen.Ratings -> {
+                loadRatings(current.match.toModel())
+                matchDetail.refresh()
+            }
+            is AppScreen.Stage -> {
+                loadStageRating(current.match.toModel(), current.stage.toModel())
+                matchDetail.refresh()
+            }
+            else -> Unit
+        }
     }
 
     /**

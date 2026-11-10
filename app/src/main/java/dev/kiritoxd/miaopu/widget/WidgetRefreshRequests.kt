@@ -10,7 +10,9 @@ internal data class WidgetRefreshRequest(val id: String, val manual: Boolean)
 internal class WidgetRefreshRequests {
     private var active: Any? = null
     private var activeId: String? = null
+    private var activeSince = 0L
     private var completedId: String? = null
+    private var queuedSince = 0L
     private var failed = false
     private var resultStatus: WidgetRefreshStatus? = null
 
@@ -21,21 +23,35 @@ internal class WidgetRefreshRequests {
         pending: () -> WidgetRefreshRequest?,
         schedule: (WidgetRefreshRequest, Boolean) -> Boolean,
     ) {
+        val now = System.currentTimeMillis()
+        // A fetch that never reported back (process killed mid-run, OEM job throttling) would
+        // otherwise block every later refresh and every 30-minute system update forever.
+        if (active != null && now - activeSince >= ACTIVE_TIMEOUT_MILLIS) {
+            active = null
+            activeId = null
+            resultStatus = null
+        }
         if (active != null) return
         val queued = pending()?.takeUnless { it.id == completedId }
-        if (queued != null && (!manual || queued.manual)) {
+        // A job that stays queued for minutes on a restricted launcher will never start by
+        // itself. Let a later tap or periodic broadcast replace it instead of being swallowed.
+        val stale = queued != null && queuedSince > 0L && now - queuedSince >= QUEUE_TIMEOUT_MILLIS
+        if (queued != null && !stale && (!manual || queued.manual)) {
             failed = false
             return
         }
         val request = WidgetRefreshRequest(UUID.randomUUID().toString(), manual)
         val accepted = (manual && supportsExpedited && schedule(request, true)) || schedule(request, false)
         failed = !accepted
+        queuedSince = if (accepted) now else 0L
     }
 
     @Synchronized
     fun started(token: Any, requestId: String) {
         active = token
         activeId = requestId
+        activeSince = System.currentTimeMillis()
+        queuedSince = 0L
         failed = false
         resultStatus = null
     }
@@ -59,6 +75,7 @@ internal class WidgetRefreshRequests {
         completedId = if (reschedule) null else activeId
         active = null
         activeId = null
+        queuedSince = 0L
         resultStatus = null
         this.failed = failed
         return true
@@ -70,5 +87,10 @@ internal class WidgetRefreshRequests {
         failed -> WidgetRefreshStatus.FAILED
         pending()?.let { it.id != completedId } == true -> WidgetRefreshStatus.WAITING
         else -> WidgetRefreshStatus.IDLE
+    }
+
+    private companion object {
+        const val ACTIVE_TIMEOUT_MILLIS = 10 * 60_000L
+        const val QUEUE_TIMEOUT_MILLIS = 3 * 60_000L
     }
 }

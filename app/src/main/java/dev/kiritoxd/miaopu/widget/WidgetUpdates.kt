@@ -16,7 +16,9 @@ internal object WidgetUpdates {
     @Synchronized
     private fun enqueueRender(context: Context) {
         val app = context.applicationContext
-        val worker = queue ?: WidgetRenderQueue(scope) {
+        // Rebuild a dead consumer: otherwise every later refresh is silently sent into a channel
+        // nobody reads, and only re-adding the widget (which renders directly) shows fresh data.
+        val worker = queue?.takeIf { it.isActive } ?: WidgetRenderQueue(scope) {
             try {
                 WidgetRenderer.renderAll(app)
                 val state = WidgetScheduleStore(app).state(System.currentTimeMillis())
@@ -34,12 +36,6 @@ internal object WidgetUpdates {
     suspend fun publish(context: Context, sport: Esport, schedule: Schedule?, startedAt: Long) = withContext(Dispatchers.IO) {
         WidgetScheduleStore(context).record(sport, schedule, startedAt)
         if (WidgetRenderer.ids(context).isNotEmpty()) enqueueRender(context)
-    }
-
-    suspend fun onAppForeground(context: Context) {
-        if (WidgetRenderer.ids(context).isEmpty()) return
-        enqueueRender(context)
-        WidgetRefreshService.enqueue(context)
     }
 
     suspend fun subscriptionsChanged(context: Context) {

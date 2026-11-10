@@ -27,7 +27,10 @@ internal object WidgetIntents {
     fun refresh(context: Context, widgetId: Int): PendingIntent {
         val intent = Intent(context, MatchWidgetProvider::class.java).apply {
             action = REFRESH
-            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            // PendingIntents are sent by system_server, which by default excludes apps that
+            // have never been launched. Keep the manual refresh alive on a freshly installed
+            // device and give it foreground priority on launchers that throttle broadcasts.
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND or Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
             // UPDATE_CURRENT only replaces extras; use a new identity for the foreground flag.
             data = Uri.parse("miaopu://widget/manual-refresh/$widgetId")
         }
