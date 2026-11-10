@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal object WidgetUpdates {
@@ -21,9 +22,7 @@ internal object WidgetUpdates {
         val worker = queue?.takeIf { it.isActive } ?: WidgetRenderQueue(scope) {
             try {
                 WidgetRenderer.renderAll(app)
-                val state = WidgetScheduleStore(app).state(System.currentTimeMillis())
-                val matches = WidgetRenderer.matchesForLogos(app, state)
-                if (WidgetLogoStore(app).load(matches)) WidgetRenderer.renderAll(app)
+                loadCrests(app)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -31,6 +30,33 @@ internal object WidgetUpdates {
             }
         }.also { queue = it }
         worker.request()
+    }
+
+    /**
+     * Second pass that downloads any crest the card still lacks.
+     *
+     * It runs on this process-wide scope rather than the caller's, because a manual refresh does
+     * its work inside a broadcast receiver with a hard [WidgetDataRefresh] budget: sharing that
+     * budget cancelled the download whenever the schedule fetch used it up, which left every team
+     * that newly appeared on the card showing its letter placeholder indefinitely.
+     */
+    fun requestCrests(context: Context) {
+        val app = context.applicationContext
+        scope.launch {
+            try {
+                loadCrests(app)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w("MiaopuWidget", "Crest update did not complete", error)
+            }
+        }
+    }
+
+    suspend fun loadCrests(context: Context) {
+        val state = WidgetScheduleStore(context).state(System.currentTimeMillis())
+        val matches = WidgetRenderer.matchesForLogos(context, state)
+        if (WidgetLogoStore(context).load(matches)) WidgetRenderer.renderAll(context)
     }
 
     suspend fun publish(context: Context, sport: Esport, schedule: Schedule?, startedAt: Long) = withContext(Dispatchers.IO) {

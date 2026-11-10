@@ -10,6 +10,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
+import android.util.Log
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -92,10 +93,13 @@ internal object WidgetRenderer {
                 val compact = contentHeight < 155 || largeFont
                 val rowCount = WidgetScheduleSizing.visibleRows(contentHeight, compact, largeFont)
                 if (WidgetScheduleLayout.hasTwoColumns(context, width, compact)) {
-                    state.matches.filterNot(WidgetMatch::terminal).take(rowCount) +
-                        state.matches.filter(WidgetMatch::terminal).take(rowCount)
+                    state.matches.filter(WidgetMatch::terminal).take(rowCount) +
+                        state.matches.filterNot(WidgetMatch::terminal).take(rowCount)
                 } else {
-                    state.matches.take(rowCount)
+                    // Must mirror [create]: it moves the newest results to the top rows, so the
+                    // first N entries of the pool are not the painted rows. Taking the pool head
+                    // here left every team that only appeared as a lead result without a crest.
+                    widgetVisibleRows(state.matches, rowCount)
                 }
             }
         }.distinctBy(WidgetMatch::identity)
@@ -271,6 +275,7 @@ internal object WidgetRenderer {
             val team = match.teams.getOrNull(index)
             val name = team?.name?.takeIf(String::isNotBlank) ?: if (index == 0) match.name.ifBlank { "待定" } else "待定"
             val bitmap = store.cached(team?.logoUrl)
+            if (bitmap == null) Log.d("MiaopuWidget", "No crest for ${team?.name}: url=${team?.logoUrl}")
             views.setTextViewText(names[index], name)
             views.setTextViewText(fallbacks[index], name.take(1))
             views.setViewVisibility(fallbacks[index], if (bitmap == null) View.VISIBLE else View.GONE)

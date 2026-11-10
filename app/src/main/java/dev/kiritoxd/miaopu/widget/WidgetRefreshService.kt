@@ -28,7 +28,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import java.io.IOException
 
 /** Scheduled refreshes run here so JobScheduler keeps the process alive; a manual tap may also
  * fetch directly through [WidgetDataRefresh] while this job acts as the system-level fallback. */
@@ -145,8 +144,10 @@ internal object WidgetDataRefresh {
     suspend fun run(context: Context, timeoutMillis: Long? = null) {
         val app = context.applicationContext
         if (WidgetRenderer.ids(app).isEmpty()) return
-        if (timeoutMillis == null) fetch(app)
-        else withTimeoutOrNull(timeoutMillis) { fetch(app) }
+        if (timeoutMillis == null) fetch(app) else withTimeoutOrNull(timeoutMillis) { fetch(app) }
+        // Crests are a cosmetic second pass and must not share the receiver's data budget: a
+        // cancelled download left every newly listed team on a letter placeholder with no log.
+        WidgetUpdates.requestCrests(app)
     }
 
     private suspend fun fetch(app: Context) {
@@ -179,12 +180,5 @@ internal object WidgetDataRefresh {
             }.awaitAll()
         }
         WidgetRenderer.renderAll(app)
-        try {
-            val state = store.state(System.currentTimeMillis())
-            val matches = WidgetRenderer.matchesForLogos(app, state)
-            if (WidgetLogoStore(app).load(matches)) WidgetRenderer.renderAll(app)
-        } catch (_: IOException) {
-            // Score data is still usable when a thumbnail cannot be stored.
-        }
     }
 }
