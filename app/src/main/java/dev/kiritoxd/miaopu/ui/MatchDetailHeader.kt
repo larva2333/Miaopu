@@ -72,7 +72,9 @@ internal fun MatchHero(
                 overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             if (match.teams.size == 2) Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 HeroTeam(match.teams.getOrNull(0), Modifier.weight(1f), onTeamClick)
-                Column(Modifier.weight(1.2f), horizontalAlignment = Alignment.CenterHorizontally) {
+                // Wrap the score instead of giving it a fixed weight: a basketball score ("122 : 96")
+                // is twice as wide as a football one, and a 1.2 share cut the second half off.
+                Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(match.startMomentLabel(), fontSize = 11.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)

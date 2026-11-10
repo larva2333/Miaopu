@@ -147,9 +147,17 @@ private fun PreviousPageTabs(
         // Share the row evenly whenever every tab can still fit a short label; a fixed 96dp width
         // left big gaps between three-letter names like "CS2". Only fall back to a scrolling row
         // once the shares get too narrow to read.
+        // Past five tabs the row stops redistributing: every tab is capped at a fifth of the row
+        // and the rest scrolls, so six-plus esports never squeeze labels into unreadable slivers.
+        val maxVisibleTabs = 5
+        val cappedWidth = (maxWidth - spacing * (maxVisibleTabs - 1)) / maxVisibleTabs
         val equalWidth = (maxWidth - spacing * (labels.size - 1)) / labels.size
-        val overflowing = equalWidth < 72.dp
-        val tabWidth = if (overflowing) 96.dp else equalWidth
+        val overflowing = labels.size > maxVisibleTabs || equalWidth < 72.dp
+        val tabWidth = when {
+            labels.size > maxVisibleTabs -> cappedWidth
+            overflowing -> 96.dp
+            else -> equalWidth
+        }
         val contentWidth = if (overflowing) tabWidth * labels.size + spacing * (labels.size - 1) else maxWidth
         // Read only in graphicsLayer: progress never recomposes or remeasures the tab row.
         val indicatorPosition = animateFloatAsState(
@@ -164,8 +172,15 @@ private fun PreviousPageTabs(
                 scroll.animateScrollTo(target.coerceIn(0, scroll.maxValue), tween(TabMotionDurationMillis, easing = TabMotionEasing))
             }
         }
-        Box(Modifier.fillMaxWidth().then(if (overflowing) Modifier.horizontalScroll(scroll) else Modifier)) {
-            Box(Modifier.width(contentWidth).clip(RoundedCornerShape(50))
+        // A scrolling row would otherwise end in a straight cut at the viewport edge, because the
+        // capsule's own rounded cap has been scrolled out of sight. Rounding the viewport keeps
+        // both visible ends of the selector rounded at every scroll offset.
+        val capsule = RoundedCornerShape(50)
+        Box(
+            Modifier.fillMaxWidth()
+                .then(if (overflowing) Modifier.clip(capsule).horizontalScroll(scroll) else Modifier),
+        ) {
+            Box(Modifier.width(contentWidth).clip(capsule)
                 .background(if (connected) colors.onSurface.copy(alpha = 0.055f) else Color.Transparent)) {
                 // A single shared indicator moves behind the labels, including during interrupted transitions.
                 if (connected) Box(Modifier.matchParentSize()) {

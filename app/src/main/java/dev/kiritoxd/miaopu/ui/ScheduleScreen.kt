@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalUriHandler
@@ -996,6 +997,8 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
             ProfileActionCard(
                 title = "检查更新",
                 summary = summary,
+                // One fixed line: the status text must never change the card height.
+                summaryLines = 1,
                 action = when {
                     download is UpdateDownloadState.Downloading -> "${download.percent}%"
                     download is UpdateDownloadState.Ready -> "安装"
@@ -1038,6 +1041,12 @@ private fun ProfileActionCard(
     summary: String,
     action: String,
     enabled: Boolean = true,
+    /**
+     * Height of the summary slot in lines. Fixing it keeps the card the same height across
+     * state changes, so toggling a two-line error message back to a one-line one never
+     * yanks the card below it upwards.
+     */
+    summaryLines: Int = 1,
     onClick: () -> Unit,
 ) {
     Card(
@@ -1062,6 +1071,9 @@ private fun ProfileActionCard(
                     summary,
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    minLines = summaryLines,
+                    maxLines = summaryLines,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.width(12.dp))
