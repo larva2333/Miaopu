@@ -69,6 +69,8 @@ sealed interface UpdateDownloadState {
     data class Downloading(val percent: Int) : UpdateDownloadState
     data class Ready(val file: File) : UpdateDownloadState
     data class Failed(val message: String) : UpdateDownloadState
+    /** Native link stalled; the user must explicitly choose to download through a mirror. */
+    data object RouteTimeout : UpdateDownloadState
 }
 
 enum class MainSection {
@@ -139,6 +141,8 @@ class MiaopuViewModel(
         private set
     var updateDownloadState: UpdateDownloadState by mutableStateOf(UpdateDownloadState.Idle)
         private set
+    /** Remembers the route chosen after a timeout so a retry does not fall back to the native link. */
+    private var updateUseMirror = false
 
     val currentVersion: String get() = BuildConfig.VERSION_NAME
     val repositoryUrl: String get() = GitHubReleaseAdapter.REPOSITORY_URL
@@ -406,6 +410,8 @@ class MiaopuViewModel(
 
     fun checkForUpdates() {
         if (updateCheckState == UpdateCheckState.Checking) return
+        // A fresh check starts from the native link again.
+        updateUseMirror = false
         updateCheckState = UpdateCheckState.Checking
         viewModelScope.launch {
             val result = releaseAdapter.latest()
@@ -420,7 +426,7 @@ class MiaopuViewModel(
     }
 
     /** Downloads the release APK inside the app and immediately offers the system installer. */
-    fun downloadUpdate() {
+    fun downloadUpdate(useMirror: Boolean = updateUseMirror) {
         val release = (updateCheckState as? UpdateCheckState.Available)?.release ?: return
         if (updateDownloadState is UpdateDownloadState.Downloading) return
         val url = release.apkUrl
@@ -428,11 +434,12 @@ class MiaopuViewModel(
             message = "该版本未附带安装包，请在发布页手动下载"
             return
         }
+        updateUseMirror = useMirror
         updateDownloadState = UpdateDownloadState.Downloading(0)
         viewModelScope.launch {
             try {
                 val file = AppUpdateDownloader(getApplication())
-                    .download(url, "Miaopu-${release.tagName}.apk") { percent ->
+                    .download(url, "Miaopu-${release.tagName}.apk", useMirror = useMirror) { percent ->
                         // Progress arrives on the download thread; publish on main and never go backwards.
                         viewModelScope.launch {
                             val shown = (updateDownloadState as? UpdateDownloadState.Downloading)?.percent ?: 0
@@ -442,7 +449,13 @@ class MiaopuViewModel(
                 updateDownloadState = UpdateDownloadState.Ready(file)
                 installUpdate()
             } catch (error: Exception) {
-                updateDownloadState = UpdateDownloadState.Failed(error.message ?: "下载失败")
+                // A stalled native link waits for an explicit "switch route" tap; a failed
+                // mirror download is a normal error with a retry.
+                updateDownloadState = if (useMirror) {
+                    UpdateDownloadState.Failed(error.message ?: "下载失败")
+                } else {
+                    UpdateDownloadState.RouteTimeout
+                }
             }
         }
     }

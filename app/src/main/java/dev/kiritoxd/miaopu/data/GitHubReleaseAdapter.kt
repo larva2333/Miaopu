@@ -18,31 +18,47 @@ data class GitHubRelease(
 )
 
 class GitHubReleaseAdapter {
+    /** Try the native GitHub API first, then fall back to a mirror within the same 8s budget. */
     suspend fun latest(): AdapterResult<GitHubRelease> = withContext(Dispatchers.IO) {
-        val source = "github.release.latest"
-        val connection = (URL(LATEST_RELEASE_API).openConnection() as HttpsURLConnection).apply {
+        var lastFailure: AdapterResult<GitHubRelease>? = null
+        for (url in RELEASE_API_URLS) {
+            val result = fetch(url)
+            // 404 means "no release published", not a network problem; another route agrees.
+            if (result.data != null || result.status == AdapterStatus.NOT_CONFIGURED) return@withContext result
+            lastFailure = result
+        }
+        lastFailure ?: AdapterResult.failure(
+            source = SOURCE,
+            status = AdapterStatus.TRANSIENT_FAILURE,
+            message = "GitHub 更新服务暂时不可用",
+            retryable = true,
+        )
+    }
+
+    private fun fetch(url: String): AdapterResult<GitHubRelease> {
+        val connection = (URL(url).openConnection() as HttpsURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 12_000
+            connectTimeout = ROUTE_TIMEOUT_MILLIS
+            readTimeout = ROUTE_TIMEOUT_MILLIS
             instanceFollowRedirects = true
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
             setRequestProperty("User-Agent", "Miaopu-Android")
         }
-        try {
+        return try {
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             when {
                 status == HttpURLConnection.HTTP_NOT_FOUND -> AdapterResult.failure(
-                    source = source,
+                    source = SOURCE,
                     status = AdapterStatus.NOT_CONFIGURED,
                     message = "仓库暂未发布 Release",
                     retryable = false,
                     httpCode = status,
                 )
                 status !in 200..299 -> AdapterResult.failure(
-                    source = source,
+                    source = SOURCE,
                     status = AdapterStatus.TRANSIENT_FAILURE,
                     message = "GitHub 更新服务暂时不可用",
                     retryable = true,
@@ -50,10 +66,10 @@ class GitHubReleaseAdapter {
                 )
                 else -> runCatching { parseGitHubRelease(body) }
                     .fold(
-                        onSuccess = { AdapterResult.success(source, it) },
+                        onSuccess = { AdapterResult.success(SOURCE, it) },
                         onFailure = {
                             AdapterResult.failure(
-                                source = source,
+                                source = SOURCE,
                                 status = AdapterStatus.INVALID_RESPONSE,
                                 message = it.message ?: "GitHub Release 响应格式已变化",
                                 retryable = false,
@@ -64,7 +80,7 @@ class GitHubReleaseAdapter {
             }
         } catch (error: IOException) {
             AdapterResult.failure(
-                source = source,
+                source = SOURCE,
                 status = AdapterStatus.TRANSIENT_FAILURE,
                 message = error.message ?: "无法连接 GitHub",
                 retryable = true,
@@ -77,6 +93,12 @@ class GitHubReleaseAdapter {
     companion object {
         const val REPOSITORY_URL = "https://github.com/larva2333/Miaopu"
         const val LATEST_RELEASE_API = "https://api.github.com/repos/larva2333/Miaopu/releases/latest"
+        /** Prefixes tried in order after a direct download stalls. Consumed by AppUpdateDownloader. */
+        internal val DOWNLOAD_PROXIES = listOf("https://gh-proxy.com/", "https://ghfast.top/")
+        private const val SOURCE = "github.release.latest"
+        private const val ROUTE_TIMEOUT_MILLIS = 8_000
+        private const val API_PROXY = "https://gh-proxy.com/"
+        private val RELEASE_API_URLS = listOf(LATEST_RELEASE_API, API_PROXY + LATEST_RELEASE_API)
     }
 }
 

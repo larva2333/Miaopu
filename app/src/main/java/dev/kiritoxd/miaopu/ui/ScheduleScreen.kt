@@ -984,6 +984,7 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                 download is UpdateDownloadState.Downloading -> "正在下载安装包 ${download.percent}%"
                 download is UpdateDownloadState.Ready -> "安装包已下载，点击安装"
                 download is UpdateDownloadState.Failed -> download.message
+                download is UpdateDownloadState.RouteTimeout -> "连接超时，切换线路"
                 else -> when (updateState) {
                     UpdateCheckState.Idle -> "当前版本 ${viewModel.currentVersion}"
                     UpdateCheckState.Checking -> "正在查询 GitHub Release…"
@@ -999,6 +1000,7 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                     download is UpdateDownloadState.Downloading -> "${download.percent}%"
                     download is UpdateDownloadState.Ready -> "安装"
                     download is UpdateDownloadState.Failed -> "重试"
+                    download is UpdateDownloadState.RouteTimeout -> "重新下载"
                     updateState == UpdateCheckState.Checking -> "检查中"
                     updateState is UpdateCheckState.Available -> "下载"
                     updateState is UpdateCheckState.Failed -> "重试"
@@ -1009,6 +1011,7 @@ private fun ProfileContent(viewModel: MiaopuViewModel, innerPadding: PaddingValu
                     when {
                         download is UpdateDownloadState.Ready -> viewModel.installUpdate()
                         download is UpdateDownloadState.Failed -> viewModel.downloadUpdate()
+                        download is UpdateDownloadState.RouteTimeout -> viewModel.downloadUpdate(useMirror = true)
                         updateState is UpdateCheckState.Available ->
                             if (updateState.release.apkUrl == null) uriHandler.openUri(updateState.release.pageUrl)
                             else viewModel.downloadUpdate()
