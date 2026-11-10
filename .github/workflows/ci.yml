@@ -1,10 +1,10 @@
 name: Build & Release
 
 on:
+  # A release push updates both main and the tag. GitHub emits a separate push event for each
+  # ref, so matching branches as well would start a second, redundant build alongside the tag.
+  # Only tag pushes build automatically; use a PR or manual dispatch for non-release builds.
   push:
-    branches:
-      - main
-      - "codex/**"
     tags:
       - "[0-9]+.[0-9]+"
       - "[0-9]+.[0-9]+.[0-9]+"
