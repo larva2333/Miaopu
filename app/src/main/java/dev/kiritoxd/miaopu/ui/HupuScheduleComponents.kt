@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -332,7 +333,9 @@ internal fun HupuScheduleMatchCard(match: MatchSummary, onClick: () -> Unit) {
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(
-                    modifier = Modifier.width(70.dp),
+                    // A fixed 70.dp clipped longer counts such as "225.3万人评分" to an ellipsis.
+                    // Let the column grow with the text, capped so the team column keeps its room.
+                    modifier = Modifier.widthIn(min = 70.dp, max = 92.dp),
                     horizontalAlignment = Alignment.End,
                 ) {
                     Text(
@@ -346,8 +349,11 @@ internal fun HupuScheduleMatchCard(match: MatchSummary, onClick: () -> Unit) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = scoreCount,
-                            maxLines = 1,
+                            // Two lines keep exceptionally long counts readable without
+                            // widening the column any further.
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.End,
                             style = MiuixTheme.textStyles.footnote2,
                             color = mutedColor,
                         )
