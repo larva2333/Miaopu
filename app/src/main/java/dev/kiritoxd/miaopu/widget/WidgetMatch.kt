@@ -74,8 +74,8 @@ internal fun selectWidgetMatches(
     val candidates = matches.filter {
         EsportCatalog.byBusinessId(it.businessId) != null &&
             it.startsAt <= now + WIDGET_FIXTURE_WINDOW_HOURS * hour &&
-            // Results may sit further back than fixtures: a break in the schedule should not
-            // erase the last thing that happened.
+            // Results use their own lookback instead of the fixture window: a break in the
+            // schedule should not erase the last thing that happened.
             it.startsAt >= now - maxOf(48 * hour, historyHoursBack.coerceAtLeast(0) * hour) &&
             (!it.live || it.startsAt >= now - 12 * hour)
     }.distinctBy(WidgetMatch::identity)
@@ -112,8 +112,8 @@ internal fun widgetCardPool(
     matches,
     now,
     perSection,
-    // Results get a wider lookback than the fixture window, otherwise a week without a match
-    // leaves the card with only the upcoming rows and nothing to report.
+    // Results use the same month-long lookback as the fixtures, so a gap between rounds does
+    // not leave the card with only upcoming rows and nothing to report.
     WIDGET_RESULT_WINDOW_HOURS,
 )
 
@@ -144,8 +144,9 @@ internal fun widgetVisibleRows(matches: List<WidgetMatch>, rowCount: Int): List<
  *  gap before a play-off series still surfaces the next block of matches. */
 internal const val WIDGET_FIXTURE_WINDOW_HOURS = 30 * 24L
 
-/** How far back a widget looks for results. A week covers the gaps between rounds. */
-internal const val WIDGET_RESULT_WINDOW_HOURS = 7 * 24L
+/** How far back a widget looks for results: the same month as the fixtures, so an off-season
+ *  gap does not leave the card with nothing to report. */
+internal const val WIDGET_RESULT_WINDOW_HOURS = 30 * 24L
 
 internal fun WidgetMatch.scoreLabel(): String = when {
     !live && !terminal -> "VS"

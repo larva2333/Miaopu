@@ -70,6 +70,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
+          # By default this action only writes the cache on the default branch. This workflow
+          # runs on tags / PRs / manual dispatch, so the default left every build with an empty
+          # Gradle home (0 restored, 0 saved). Fork PRs stay read-only to avoid cache poisoning.
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Install Android SDK 37
         run: |
@@ -115,7 +119,10 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          # assembleRelease pulls in lintVital, which costs ~40s per run. Release builds are
+          # verified locally before tagging, so keep CI to the APK itself.
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -x lintVitalRelease -x lintVitalAnalyzeRelease -x lintVitalReportRelease
 
       - name: Verify release APK signature
         if: env.MIAOPU_RELEASE_SIGNING_READY == 'true'

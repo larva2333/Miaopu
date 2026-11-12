@@ -172,14 +172,19 @@ class WidgetMatchTest {
         assertEquals(listOf("done-3", "done-2", "done-1", "live"), card.map { it.id })
     }
 
-    @Test fun `card still reports a result from beyond the fixture window`() {
+    @Test fun `card reaches a month back for results while the default selector stays short`() {
         val old = match("done-old", "已结束", now - 72 * hour)
         val pool = widgetCardPool(listOf(match("next-1", "未开始", now + hour), old), now)
         assertEquals(listOf("done-old", "next-1"), widgetVisibleRows(pool, 8).map { it.id })
-        // The candidate list keeps its narrow window; only the card reaches back for results.
+        // The default selector keeps its own short lookback; only the card pool uses a month.
         assertTrue(selectWidgetMatches(listOf(old), now).isEmpty())
-        // Anything past a week is still dropped rather than shown as today's news.
-        assertTrue(widgetCardPool(listOf(match("stale", "已结束", now - 8 * 24 * hour)), now).isEmpty())
+        // A result three weeks old still back-fills a card with no fixtures left.
+        assertEquals(
+            listOf("three-weeks"),
+            widgetCardPool(listOf(match("three-weeks", "已结束", now - 21 * 24 * hour)), now).map { it.id },
+        )
+        // Anything past a month is still dropped rather than shown as today's news.
+        assertTrue(widgetCardPool(listOf(match("stale", "已结束", now - 31 * 24 * hour)), now).isEmpty())
     }
 
     @Test fun `does not guess live from a scheduled start time`() {
