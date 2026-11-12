@@ -32,8 +32,8 @@ android {
         applicationId = "dev.kiritoxd.miaopu"
         minSdk = 24
         targetSdk = 37
-        versionCode = 50
-        versionName = "2.3.13"
+        versionCode = 51
+        versionName = "2.3.14"
         manifestPlaceholders["appLabel"] = "喵扑"
 
         testInstrumentationRunner = "dev.kiritoxd.miaopu.widget.WidgetTestRunner"
