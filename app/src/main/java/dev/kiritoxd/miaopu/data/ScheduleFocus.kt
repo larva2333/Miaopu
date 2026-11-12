@@ -64,13 +64,13 @@ fun Schedule.liveOrUpcomingFocus(nowMillis: Long): ScheduleFocusTarget? {
 }
 
 /**
- * Builds the home feed from the five-day local-date window centered on today.
- * Every match from two days ago through two days ahead is retained.
+ * Builds the home feed from the 15-day local-date window centered on today:
+ * one week of results behind us and one week of fixtures ahead.
  */
 fun Schedule.homeWindowAround(nowMillis: Long): Schedule {
     if (days.isEmpty()) return this
 
-    val visibleDateKeys = dateKeysAround(nowMillis, daysBefore = 2, daysAfter = 2)
+    val visibleDateKeys = dateKeysAround(nowMillis, daysBefore = 7, daysAfter = 7)
     val visibleDays = days.filter { it.date in visibleDateKeys }
     if (visibleDays.isEmpty()) return copy(anchorMatchId = null, days = emptyList())
 

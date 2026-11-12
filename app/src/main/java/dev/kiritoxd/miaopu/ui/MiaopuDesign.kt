@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -247,17 +246,10 @@ internal fun CompactTeamLine(team: Team) {
     }
 }
 
+/** Every loading / empty / error state carries the app icon instead of a placeholder glyph. */
 @Composable
 internal fun DefaultMessageBadge() {
-    Box(
-        Modifier
-            .size(52.dp)
-            .clip(CircleShape)
-            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("喵", color = MiuixTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-    }
+    AppIconBadge()
 }
 
 @Composable

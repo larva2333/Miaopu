@@ -48,9 +48,10 @@ class ScheduleFocusTest {
     }
 
     @Test
-    fun `home keeps every match from two days before through two days after`() {
+    fun `home keeps every match from a week before through a week after`() {
         val schedule = scheduleOf(
-            day("2026-08-21", match("too-old", "已结束", time(21, 10))),
+            day("2026-08-16", match("outside-before", "已结束", time(16, 10))),
+            day("2026-08-21", match("week-old", "已结束", time(21, 10))),
             day("2026-08-22", match("two-days-ago", "已结束", time(22, 10))),
             day("2026-08-23", match("yesterday", "已结束", time(23, 10))),
             day(
@@ -61,18 +62,25 @@ class ScheduleFocusTest {
             ),
             day("2026-08-25", match("tomorrow", "未开始", time(25, 15))),
             day("2026-08-26", match("two-days-ahead", "未开始", time(26, 15))),
-            day("2026-08-27", match("too-late", "未开始", time(27, 15))),
+            day("2026-08-27", match("week-ahead", "未开始", time(27, 15))),
+            day("2026-09-01", match("outside-after", "未开始", time(1, 15, Calendar.SEPTEMBER))),
         )
 
         val home = schedule.homeWindowAround(nowMillis = time(24, 16))
 
         assertEquals("live", home.anchorMatchId)
         assertEquals(
-            listOf("2026-08-22", "2026-08-23", "2026-08-24", "2026-08-25", "2026-08-26"),
+            listOf(
+                "2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24",
+                "2026-08-25", "2026-08-26", "2026-08-27",
+            ),
             home.days.map { it.date },
         )
         assertEquals(
-            listOf("two-days-ago", "yesterday", "ended", "live", "later", "tomorrow", "two-days-ahead"),
+            listOf(
+                "week-old", "two-days-ago", "yesterday", "ended", "live", "later",
+                "tomorrow", "two-days-ahead", "week-ahead",
+            ),
             home.days.flatMap { it.matches }.map { it.id },
         )
     }
@@ -92,18 +100,26 @@ class ScheduleFocusTest {
     }
 
     @Test
-    fun `home excludes event days outside the five day date window`() {
+    fun `home includes the week boundary days and excludes anything beyond them`() {
         val schedule = scheduleOf(
-            day("2026-08-20", match("outside-before", "已结束", time(20, 10))),
+            day("2026-08-16", match("outside-before", "已结束", time(16, 10))),
+            day("2026-08-17", match("edge-before", "已结束", time(17, 10))),
             day("2026-08-22", match("inside-before", "已结束", time(22, 10))),
             day("2026-08-26", match("inside-after", "未开始", time(26, 10))),
-            day("2026-08-28", match("outside-after", "未开始", time(28, 10))),
+            day("2026-08-31", match("edge-after", "未开始", time(31, 10))),
+            day("2026-09-01", match("outside-after", "未开始", time(1, 10, Calendar.SEPTEMBER))),
         )
 
         val home = schedule.homeWindowAround(nowMillis = time(24, 16))
 
-        assertEquals(listOf("2026-08-22", "2026-08-26"), home.days.map { it.date })
-        assertEquals(listOf("inside-before", "inside-after"), home.days.flatMap { it.matches }.map { it.id })
+        assertEquals(
+            listOf("2026-08-17", "2026-08-22", "2026-08-26", "2026-08-31"),
+            home.days.map { it.date },
+        )
+        assertEquals(
+            listOf("edge-before", "inside-before", "inside-after", "edge-after"),
+            home.days.flatMap { it.matches }.map { it.id },
+        )
     }
 
     @Test
@@ -282,10 +298,11 @@ class ScheduleFocusTest {
     fun `full schedule focus still finds next match outside home window`() {
         val schedule = scheduleOf(
             day("2026-08-23", match("ended", "已结束", time(23, 10))),
-            day("2026-08-30", match("next-week", "未开始", time(30, 18))),
+            // A fortnight out is past the home feed's one-week-ahead window.
+            day("2026-09-05", match("next-month", "未开始", time(5, 18, Calendar.SEPTEMBER))),
         )
 
-        assertEquals("next-week", schedule.focusMatchId(time(24, 16)))
+        assertEquals("next-month", schedule.focusMatchId(time(24, 16)))
     }
 
     @Test
@@ -344,8 +361,8 @@ class ScheduleFocusTest {
         uniqueKey = uniqueKey,
     )
 
-    private fun time(dayOfMonth: Int, hour: Int): Long = Calendar.getInstance().run {
-        set(2026, Calendar.AUGUST, dayOfMonth, hour, 0, 0)
+    private fun time(dayOfMonth: Int, hour: Int, month: Int = Calendar.AUGUST): Long = Calendar.getInstance().run {
+        set(2026, month, dayOfMonth, hour, 0, 0)
         set(Calendar.MILLISECOND, 0)
         timeInMillis
     }

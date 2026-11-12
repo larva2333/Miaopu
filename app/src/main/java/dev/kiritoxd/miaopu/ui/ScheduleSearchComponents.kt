@@ -60,9 +60,9 @@ internal fun EventsScheduleSearchBar(
     ) {}
 }
 
-/** The launcher artwork (red gradient + paw) shown when a search has no hits. */
+/** The launcher artwork (red gradient + paw) used by every loading and empty state. */
 @Composable
-private fun AppIconBadge() {
+internal fun AppIconBadge() {
     Box(
         modifier = Modifier
             .size(52.dp)
@@ -91,7 +91,6 @@ internal fun EventsScheduleSearchResults(
         EmptyPane(
             message = "没有找到“${query.trim()}”相关赛程",
             modifier = Modifier.fillMaxSize().padding(bottom = bottomPadding),
-            badge = { AppIconBadge() },
         )
         return
     }
